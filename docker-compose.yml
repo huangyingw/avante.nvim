@@ -1,0 +1,9 @@
+version: '3'
+services:
+  neovim:
+    build: .
+    volumes:
+      - ./workspace:/root/workspace
+    tty: true
+    stdin_open: true
+
