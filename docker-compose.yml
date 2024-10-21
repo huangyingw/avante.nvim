@@ -6,4 +6,6 @@ services:
       - ./workspace:/root/workspace
     tty: true
     stdin_open: true
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
 
