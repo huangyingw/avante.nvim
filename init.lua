@@ -55,14 +55,36 @@ require("lazy").setup({
   },
 })
 
+-- 在文件顶部添加
+local function debug_print(msg)
+  print(msg)
+  vim.cmd('messages')
+end
+
+-- 在加载 avante_lib 之前添加
+debug_print("Attempting to load avante_lib")
+local ok, err = pcall(require, 'avante_lib')
+if not ok then
+  debug_print("Failed to load avante_lib: " .. tostring(err))
+else
+  debug_print("Successfully loaded avante_lib")
+end
+
 -- 加载 avante_lib
 require('avante_lib').load()
 
--- 设置 avante
-require('avante').setup({
+-- 在设置 avante 之前添加
+debug_print("Attempting to setup avante")
+ok, err = pcall(require('avante').setup, {
   -- 您的配置在这里
 })
+if not ok then
+  debug_print("Failed to setup avante: " .. tostring(err))
+else
+  debug_print("Successfully setup avante")
+end
 
 -- 设置推荐的 Neovim 选项
 vim.opt.laststatus = 3
 
+package.cpath = package.cpath .. ";/root/.local/share/nvim/lazy/avante.nvim/lua/avante/?.so"
