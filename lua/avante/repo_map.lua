@@ -221,4 +221,17 @@ function RepoMap.show()
   vim.api.nvim_buf_set_lines(popup.bufnr, 0, -1, false, lines)
 end
 
+local function debug_print(msg)
+  print(msg)
+  vim.cmd('messages')
+end
+
+debug_print("Attempting to load avante_repo_map")
+local ok, core = pcall(require, "avante_repo_map")
+if not ok then
+  debug_print("Failed to load avante_repo_map: " .. tostring(core))
+else
+  debug_print("Successfully loaded avante_repo_map")
+end
+
 return RepoMap
