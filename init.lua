@@ -22,7 +22,7 @@ require("lazy").setup({
     opts = {
       -- 在这里添加任何选项
     },
-    build = "make",
+    build = "make BUILD_FROM_SOURCE=true",
     dependencies = {
       "nvim-treesitter/nvim-treesitter",
       "stevearc/dressing.nvim",
