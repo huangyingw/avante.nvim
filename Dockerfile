@@ -50,10 +50,6 @@ WORKDIR /root/workspace
 # 清理不必要的包和缓存
 RUN apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# 安装 avante.nvim 并编译
-RUN nvim --headless -c "lua require('lazy').sync()" -c "qa"
-RUN cd /root/.local/share/nvim/lazy/avante.nvim && make
-
 # 安装 Lua 和 LuaJIT
 RUN apt-get update && apt-get install -y \
     lua5.1 \
@@ -67,32 +63,21 @@ ENV LUA_PATH="/usr/local/share/lua/5.1/?.lua;/usr/local/share/lua/5.1/?/init.lua
 ENV LUA_CPATH="/usr/local/lib/lua/5.1/?.so;/usr/lib/x86_64-linux-gnu/lua/5.1/?.so;/usr/lib/lua/5.1/?.so;/usr/local/lib/lua/5.1/loadall.so"
 ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games:/snap/bin:/root/.cargo/bin"
 
-# 添加调试信息
+# 安装 avante.nvim 并编译
+RUN nvim --headless -c "lua require('lazy').sync()" -c "qa"
+
+# 手动编译 avante.nvim
+RUN cd /root/.local/share/nvim/lazy/avante.nvim && \
+    make clean && \
+    make BUILD_FROM_SOURCE=true && \
+    ls -l lua/avante/
+
+# 验证编译结果
 RUN ls -la /root/.local/share/nvim/lazy/avante.nvim
 RUN ls -la /root/.local/share/nvim/lazy/avante.nvim/lua/avante
-
-# 尝试手动编译 avante_repo_map
-RUN cd /root/.local/share/nvim/lazy/avante.nvim && \
-    cargo clean && \
-    cargo build --release --features luajit && \
-    ls -l target/release/ && \
-    cp target/release/libavante_repo_map.so lua/avante/avante_repo_map.so && \
-    ls -l lua/avante/
 
 # 设置环境变量
 ENV LD_LIBRARY_PATH=/root/.local/share/nvim/lazy/avante.nvim/lua/avante:$LD_LIBRARY_PATH
 ENV LUA_CPATH="/root/.local/share/nvim/lazy/avante.nvim/lua/avante/?.so;${LUA_CPATH}"
-
-# 编辑 Cargo.toml 文件，只启用 luajit 特性
-RUN sed -i 's/^features = .*/features = ["luajit"]/' /root/.local/share/nvim/lazy/avante.nvim/Cargo.toml
-
-# 对于 crates/avante-repo-map/Cargo.toml 文件也进行同样的修改
-RUN sed -i 's/^features = .*/features = ["luajit"]/' /root/.local/share/nvim/lazy/avante.nvim/crates/avante-repo-map/Cargo.toml
-
-ENV LUA_VERSION=luajit
-
-# 添加调试命令
-RUN echo $LUA_CPATH
-RUN cat /root/.local/share/nvim/lazy/avante.nvim/Cargo.toml
 
 CMD ["nvim"]
