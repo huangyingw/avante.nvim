@@ -1,0 +1,226 @@
+diff --git a/.cursorrules b/.cursorrules
+new file mode 100644
+--- /dev/null
++++ ./.cursorrules
+@@ -0,0 +1 @@
++用中文回答
+diff --git a/Dockerfile b/Dockerfile
+new file mode 100644
+--- /dev/null
++++ ./Dockerfile
+@@ -0,0 +1,83 @@
++FROM ubuntu:22.04
++
++# 避免交互式前端
++ENV DEBIAN_FRONTEND=noninteractive
++
++# 设置时区
++ENV TZ=Asia/Shanghai
++
++# 安装必要的包
++RUN apt-get update && apt-get install -y \
++    git \
++    nodejs \
++    npm \
++    curl \
++    make \
++    gcc \
++    g++ \
++    libc-dev \
++    cmake \
++    pkg-config \
++    unzip \
++    gettext \
++    libssl-dev \
++    && rm -rf /var/lib/apt/lists/*
++
++# 安装 Rust 和 Cargo
++RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
++ENV PATH="/root/.cargo/bin:${PATH}"
++
++# 安装最新版本的 Neovim
++RUN git clone https://github.com/neovim/neovim.git /tmp/neovim \
++    && cd /tmp/neovim \
++    && make CMAKE_BUILD_TYPE=RelWithDebInfo \
++    && make install \
++    && rm -rf /tmp/neovim
++
++# 设置 Neovim 配置目录
++RUN mkdir -p /root/.config/nvim
++
++# 安装 lazy.nvim（插件管理器）
++RUN git clone --filter=blob:none https://github.com/folke/lazy.nvim.git \
++    --branch=stable /root/.local/share/nvim/lazy/lazy.nvim
++
++# 复制 Neovim 配置
++COPY init.lua /root/.config/nvim/init.lua
++
++# 设置工作目录
++WORKDIR /root/workspace
++
++# 清理不必要的包和缓存
++RUN apt-get clean && rm -rf /var/lib/apt/lists/*
++
++# 安装 Lua 和 LuaJIT
++RUN apt-get update && apt-get install -y \
++    lua5.1 \
++    liblua5.1-0-dev \
++    luajit \
++    libluajit-5.1-dev \
++    && rm -rf /var/lib/apt/lists/*
++
++# 设置 Lua 和 LuaJIT 的环境变量
++ENV LUA_PATH="/usr/local/share/lua/5.1/?.lua;/usr/local/share/lua/5.1/?/init.lua;/usr/share/lua/5.1/?.lua;/usr/share/lua/5.1/?/init.lua"
++ENV LUA_CPATH="/usr/local/lib/lua/5.1/?.so;/usr/lib/x86_64-linux-gnu/lua/5.1/?.so;/usr/lib/lua/5.1/?.so;/usr/local/lib/lua/5.1/loadall.so"
++ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games:/snap/bin:/root/.cargo/bin"
++
++# 安装 avante.nvim 并编译
++RUN nvim --headless -c "lua require('lazy').sync()" -c "qa"
++
++# 手动编译 avante.nvim
++RUN cd /root/.local/share/nvim/lazy/avante.nvim && \
++    make clean && \
++    make BUILD_FROM_SOURCE=true && \
++    ls -l lua/avante/
++
++# 验证编译结果
++RUN ls -la /root/.local/share/nvim/lazy/avante.nvim
++RUN ls -la /root/.local/share/nvim/lazy/avante.nvim/lua/avante
++
++# 设置环境变量
++ENV LD_LIBRARY_PATH=/root/.local/share/nvim/lazy/avante.nvim/lua/avante:$LD_LIBRARY_PATH
++ENV LUA_CPATH="/root/.local/share/nvim/lazy/avante.nvim/lua/avante/?.so;${LUA_CPATH}"
++
++CMD ["nvim"]
+diff --git a/docker-compose.yml b/docker-compose.yml
+new file mode 100644
+--- /dev/null
++++ ./docker-compose.yml
+@@ -0,0 +1,11 @@
++version: '3'
++services:
++  neovim:
++    build: .
++    volumes:
++      - ./workspace:/root/workspace
++    tty: true
++    stdin_open: true
++    environment:
++      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
++
+diff --git a/init.lua b/init.lua
+new file mode 100644
+--- /dev/null
++++ ./init.lua
+@@ -0,0 +1,90 @@
++-- 引导 lazy.nvim
++local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
++if not vim.loop.fs_stat(lazypath) then
++  vim.fn.system({
++    "git",
++    "clone",
++    "--filter=blob:none",
++    "https://github.com/folke/lazy.nvim.git",
++    "--branch=stable",
++    lazypath,
++  })
++end
++vim.opt.rtp:prepend(lazypath)
++
++-- 设置插件
++require("lazy").setup({
++  {
++    "yetone/avante.nvim",
++    event = "VeryLazy",
++    lazy = false,
++    version = false,
++    opts = {
++      -- 在这里添加任何选项
++    },
++    build = "make BUILD_FROM_SOURCE=true",
++    dependencies = {
++      "nvim-treesitter/nvim-treesitter",
++      "stevearc/dressing.nvim",
++      "nvim-lua/plenary.nvim",
++      "MunifTanjim/nui.nvim",
++      "nvim-tree/nvim-web-devicons",
++      "zbirenbaum/copilot.lua",
++      {
++        "HakonHarnes/img-clip.nvim",
++        event = "VeryLazy",
++        opts = {
++          default = {
++            embed_image_as_base64 = false,
++            prompt_for_file_name = false,
++            drag_and_drop = {
++              insert_mode = true,
++            },
++            use_absolute_path = true,
++          },
++        },
++      },
++      {
++        'MeanderingProgrammer/render-markdown.nvim',
++        opts = {
++          file_types = { "markdown", "Avante" },
++        },
++        ft = { "markdown", "Avante" },
++      },
++    },
++  },
++})
++
++-- 在文件顶部添加
++local function debug_print(msg)
++  print(msg)
++  vim.cmd('messages')
++end
++
++-- 在加载 avante_lib 之前添加
++debug_print("Attempting to load avante_lib")
++local ok, err = pcall(require, 'avante_lib')
++if not ok then
++  debug_print("Failed to load avante_lib: " .. tostring(err))
++else
++  debug_print("Successfully loaded avante_lib")
++end
++
++-- 加载 avante_lib
++require('avante_lib').load()
++
++-- 在设置 avante 之前添加
++debug_print("Attempting to setup avante")
++ok, err = pcall(require('avante').setup, {
++  -- 您的配置在这里
++})
++if not ok then
++  debug_print("Failed to setup avante: " .. tostring(err))
++else
++  debug_print("Successfully setup avante")
++end
++
++-- 设置推荐的 Neovim 选项
++vim.opt.laststatus = 3
++
++package.cpath = package.cpath .. ";/root/.local/share/nvim/lazy/avante.nvim/lua/avante/?.so"
+diff --git a/lua/avante/repo_map.lua b/lua/avante/repo_map.lua
+--- ./lua/avante/repo_map.lua
++++ ./lua/avante/repo_map.lua
+@@ -221,4 +221,17 @@ function RepoMap.show()
+   vim.api.nvim_buf_set_lines(popup.bufnr, 0, -1, false, lines)
+ end
+ 
++local function debug_print(msg)
++  print(msg)
++  vim.cmd('messages')
++end
++
++debug_print("Attempting to load avante_repo_map")
++local ok, core = pcall(require, "avante_repo_map")
++if not ok then
++  debug_print("Failed to load avante_repo_map: " .. tostring(core))
++else
++  debug_print("Successfully loaded avante_repo_map")
++end
++
+ return RepoMap
