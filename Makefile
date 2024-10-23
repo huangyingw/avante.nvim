@@ -44,6 +44,8 @@ define build_package
 $1-$2:
 	cargo build --release --features=$1 -p avante-$2
 	cp target/release/libavante_$(shell echo $2 | tr - _).$(EXT) $(BUILD_DIR)/avante_$(shell echo $2 | tr - _).$(EXT)
+	@mkdir -p lua/avante
+	cp $(BUILD_DIR)/avante_$(shell echo $2 | tr - _).$(EXT) lua/avante/
 endef
 
 define build_targets
