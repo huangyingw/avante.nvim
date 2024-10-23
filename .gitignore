@@ -44,3 +44,4 @@ temp/
 config.personal.lua
 
 target
+*.dylib
