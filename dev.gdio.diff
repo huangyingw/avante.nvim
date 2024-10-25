@@ -1,226 +1,366 @@
-diff --git a/.cursorrules b/.cursorrules
-new file mode 100644
---- /dev/null
-+++ ./.cursorrules
-@@ -0,0 +1 @@
-+用中文回答
-diff --git a/Dockerfile b/Dockerfile
-new file mode 100644
---- /dev/null
-+++ ./Dockerfile
-@@ -0,0 +1,83 @@
-+FROM ubuntu:22.04
-+
-+# 避免交互式前端
-+ENV DEBIAN_FRONTEND=noninteractive
-+
-+# 设置时区
-+ENV TZ=Asia/Shanghai
-+
-+# 安装必要的包
-+RUN apt-get update && apt-get install -y \
-+    git \
-+    nodejs \
-+    npm \
-+    curl \
-+    make \
-+    gcc \
-+    g++ \
-+    libc-dev \
-+    cmake \
-+    pkg-config \
-+    unzip \
-+    gettext \
-+    libssl-dev \
-+    && rm -rf /var/lib/apt/lists/*
-+
-+# 安装 Rust 和 Cargo
-+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-+ENV PATH="/root/.cargo/bin:${PATH}"
-+
-+# 安装最新版本的 Neovim
-+RUN git clone https://github.com/neovim/neovim.git /tmp/neovim \
-+    && cd /tmp/neovim \
-+    && make CMAKE_BUILD_TYPE=RelWithDebInfo \
-+    && make install \
-+    && rm -rf /tmp/neovim
-+
-+# 设置 Neovim 配置目录
-+RUN mkdir -p /root/.config/nvim
-+
-+# 安装 lazy.nvim（插件管理器）
-+RUN git clone --filter=blob:none https://github.com/folke/lazy.nvim.git \
-+    --branch=stable /root/.local/share/nvim/lazy/lazy.nvim
-+
-+# 复制 Neovim 配置
-+COPY init.lua /root/.config/nvim/init.lua
-+
-+# 设置工作目录
-+WORKDIR /root/workspace
-+
-+# 清理不必要的包和缓存
-+RUN apt-get clean && rm -rf /var/lib/apt/lists/*
-+
-+# 安装 Lua 和 LuaJIT
-+RUN apt-get update && apt-get install -y \
-+    lua5.1 \
-+    liblua5.1-0-dev \
-+    luajit \
-+    libluajit-5.1-dev \
-+    && rm -rf /var/lib/apt/lists/*
-+
-+# 设置 Lua 和 LuaJIT 的环境变量
-+ENV LUA_PATH="/usr/local/share/lua/5.1/?.lua;/usr/local/share/lua/5.1/?/init.lua;/usr/share/lua/5.1/?.lua;/usr/share/lua/5.1/?/init.lua"
-+ENV LUA_CPATH="/usr/local/lib/lua/5.1/?.so;/usr/lib/x86_64-linux-gnu/lua/5.1/?.so;/usr/lib/lua/5.1/?.so;/usr/local/lib/lua/5.1/loadall.so"
-+ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games:/snap/bin:/root/.cargo/bin"
-+
-+# 安装 avante.nvim 并编译
-+RUN nvim --headless -c "lua require('lazy').sync()" -c "qa"
-+
-+# 手动编译 avante.nvim
-+RUN cd /root/.local/share/nvim/lazy/avante.nvim && \
-+    make clean && \
-+    make BUILD_FROM_SOURCE=true && \
-+    ls -l lua/avante/
-+
-+# 验证编译结果
-+RUN ls -la /root/.local/share/nvim/lazy/avante.nvim
-+RUN ls -la /root/.local/share/nvim/lazy/avante.nvim/lua/avante
-+
-+# 设置环境变量
-+ENV LD_LIBRARY_PATH=/root/.local/share/nvim/lazy/avante.nvim/lua/avante:$LD_LIBRARY_PATH
-+ENV LUA_CPATH="/root/.local/share/nvim/lazy/avante.nvim/lua/avante/?.so;${LUA_CPATH}"
-+
-+CMD ["nvim"]
-diff --git a/docker-compose.yml b/docker-compose.yml
-new file mode 100644
---- /dev/null
-+++ ./docker-compose.yml
-@@ -0,0 +1,11 @@
-+version: '3'
-+services:
-+  neovim:
-+    build: .
-+    volumes:
-+      - ./workspace:/root/workspace
-+    tty: true
-+    stdin_open: true
-+    environment:
-+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-+
-diff --git a/init.lua b/init.lua
-new file mode 100644
---- /dev/null
-+++ ./init.lua
-@@ -0,0 +1,90 @@
-+-- 引导 lazy.nvim
-+local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
-+if not vim.loop.fs_stat(lazypath) then
-+  vim.fn.system({
-+    "git",
-+    "clone",
-+    "--filter=blob:none",
-+    "https://github.com/folke/lazy.nvim.git",
-+    "--branch=stable",
-+    lazypath,
-+  })
-+end
-+vim.opt.rtp:prepend(lazypath)
-+
-+-- 设置插件
-+require("lazy").setup({
-+  {
-+    "yetone/avante.nvim",
-+    event = "VeryLazy",
-+    lazy = false,
-+    version = false,
-+    opts = {
-+      -- 在这里添加任何选项
-+    },
-+    build = "make BUILD_FROM_SOURCE=true",
-+    dependencies = {
-+      "nvim-treesitter/nvim-treesitter",
-+      "stevearc/dressing.nvim",
-+      "nvim-lua/plenary.nvim",
-+      "MunifTanjim/nui.nvim",
-+      "nvim-tree/nvim-web-devicons",
-+      "zbirenbaum/copilot.lua",
-+      {
-+        "HakonHarnes/img-clip.nvim",
-+        event = "VeryLazy",
-+        opts = {
-+          default = {
-+            embed_image_as_base64 = false,
-+            prompt_for_file_name = false,
-+            drag_and_drop = {
-+              insert_mode = true,
-+            },
-+            use_absolute_path = true,
-+          },
-+        },
-+      },
-+      {
-+        'MeanderingProgrammer/render-markdown.nvim',
-+        opts = {
-+          file_types = { "markdown", "Avante" },
-+        },
-+        ft = { "markdown", "Avante" },
-+      },
-+    },
-+  },
-+})
-+
-+-- 在文件顶部添加
-+local function debug_print(msg)
-+  print(msg)
-+  vim.cmd('messages')
-+end
-+
-+-- 在加载 avante_lib 之前添加
-+debug_print("Attempting to load avante_lib")
-+local ok, err = pcall(require, 'avante_lib')
-+if not ok then
-+  debug_print("Failed to load avante_lib: " .. tostring(err))
-+else
-+  debug_print("Successfully loaded avante_lib")
-+end
-+
-+-- 加载 avante_lib
-+require('avante_lib').load()
-+
-+-- 在设置 avante 之前添加
-+debug_print("Attempting to setup avante")
-+ok, err = pcall(require('avante').setup, {
-+  -- 您的配置在这里
-+})
-+if not ok then
-+  debug_print("Failed to setup avante: " .. tostring(err))
-+else
-+  debug_print("Successfully setup avante")
-+end
-+
-+-- 设置推荐的 Neovim 选项
-+vim.opt.laststatus = 3
-+
-+package.cpath = package.cpath .. ";/root/.local/share/nvim/lazy/avante.nvim/lua/avante/?.so"
+diff --git a/Makefile b/Makefile
+--- ./Makefile
++++ ./Makefile
+@@ -44,6 +44,8 @@ define build_package
+ $1-$2:
+ 	cargo build --release --features=$1 -p avante-$2
+ 	cp target/release/libavante_$(shell echo $2 | tr - _).$(EXT) $(BUILD_DIR)/avante_$(shell echo $2 | tr - _).$(EXT)
++	@mkdir -p lua/avante
++	cp $(BUILD_DIR)/avante_$(shell echo $2 | tr - _).$(EXT) lua/avante/
+ endef
+ 
+ define build_targets
 diff --git a/lua/avante/repo_map.lua b/lua/avante/repo_map.lua
 --- ./lua/avante/repo_map.lua
 +++ ./lua/avante/repo_map.lua
-@@ -221,4 +221,17 @@ function RepoMap.show()
-   vim.api.nvim_buf_set_lines(popup.bufnr, 0, -1, false, lines)
- end
+@@ -8,217 +8,102 @@ local filetype_map = {
+   ["typescriptreact"] = "typescript",
+ }
  
+----@class AvanteRepoMap
+----@field stringify_definitions fun(lang: string, source: string): string
+-local repo_map_lib = nil
+-
+----@class avante.utils.repo_map
+ local RepoMap = {}
++local repo_map_lib
+ 
+-function RepoMap.setup()
+-  vim.defer_fn(function()
+-    local ok, core = pcall(require, "avante_repo_map")
+-    if not ok then
+-      error("Failed to load avante_repo_map")
+-      return
+-    end
+-
+-    if repo_map_lib == nil then repo_map_lib = core end
+-  end, 1000)
++-- 添加调试函数
 +local function debug_print(msg)
 +  print(msg)
 +  vim.cmd('messages')
-+end
-+
-+debug_print("Attempting to load avante_repo_map")
-+local ok, core = pcall(require, "avante_repo_map")
-+if not ok then
-+  debug_print("Failed to load avante_repo_map: " .. tostring(core))
-+else
-+  debug_print("Successfully loaded avante_repo_map")
-+end
-+
+ end
+ 
+-function RepoMap.get_ts_lang(filepath)
+-  local filetype = RepoMap.get_filetype(filepath)
+-  return filetype_map[filetype] or filetype
+-end
++-- 修改加载逻辑
++local function load_repo_map()
++  if repo_map_lib then return true end
+   
+-function RepoMap.get_filetype(filepath)
+-  local filetype = vim.filetype.match({ filename = filepath })
+-  -- TypeScript files are sometimes not detected correctly
+-  -- https://github.com/neovim/neovim/issues/27265
+-  if not filetype then
+-    local ext = fn.fnamemodify(filepath, ":e")
+-    if ext == "tsx" then filetype = "typescriptreact" end
+-    if ext == "ts" then filetype = "typescript" end
+-  end
+-  return filetype
+-end
++  debug_print("开始加载 avante_repo_map")
+   
+-function RepoMap._build_repo_map(project_root, file_ext)
+-  local output = {}
+-  local gitignore_path = project_root .. "/.gitignore"
+-  local ignore_patterns, negate_patterns = Utils.parse_gitignore(gitignore_path)
+-  local filepaths = Utils.scan_directory(project_root, ignore_patterns, negate_patterns)
+-  vim.iter(filepaths):each(function(filepath)
+-    if not Utils.is_same_file_ext(file_ext, filepath) then return end
+-    if not repo_map_lib then
+-      Utils.error("Failed to load avante_repo_map")
+-      return
+-    end
+-    local filetype = RepoMap.get_ts_lang(filepath)
+-    local definitions = filetype
+-        and repo_map_lib.stringify_definitions(filetype, Utils.file.read_content(filepath) or "")
+-      or ""
+-    if definitions == "" then return end
+-    table.insert(output, {
+-      path = Utils.relative_path(filepath),
+-      lang = RepoMap.get_filetype(filepath),
+-      defs = definitions,
+-    })
+-  end)
+-  return output
+-end
++  -- 检查系统信息
++  local os_name = vim.loop.os_uname().sysname:lower()
++  local ext = os_name == "linux" and "so" or (os_name == "darwin" and "dylib" or "dll")
++  local nvim_arch = vim.fn.system("uname -m"):gsub("\n", "")
+   
+-local cache = {}
++  debug_print("系统信息:")
++  debug_print("操作系统: " .. os_name)
++  debug_print("架构: " .. nvim_arch)
++  debug_print("package.cpath: " .. package.cpath)
+   
+-function RepoMap.get_repo_map(file_ext)
+-  local repo_map = RepoMap._get_repo_map(file_ext) or {}
+-  if not repo_map or next(repo_map) == nil then
+-    Utils.warn("The repo map is empty. Maybe do not support this language: " .. file_ext)
+-  end
+-  return repo_map
+-end
++  -- 只保留本地开发路径
++  local paths = {
++    vim.fn.expand("~/loadrc/avante.nvim/build/avante_repo_map." .. ext),
++    vim.fn.expand("~/loadrc/avante.nvim/lua/avante/avante_repo_map." .. ext)
++  }
+   
+-function RepoMap._get_repo_map(file_ext)
+-  file_ext = file_ext or vim.fn.expand("%:e")
+-  local project_root = Utils.root.get()
+-  local cache_key = project_root .. "." .. file_ext
+-  local cached = cache[cache_key]
+-  if cached then return cached end
+-
+-  local PPath = require("plenary.path")
+-  local Path = require("avante.path")
+-  local repo_map
+-
+-  local function build_and_save()
+-    repo_map = RepoMap._build_repo_map(project_root, file_ext)
+-    cache[cache_key] = repo_map
+-    Path.repo_map.save(project_root, file_ext, repo_map)
+-  end
++  for _, path in ipairs(paths) do
++    if vim.fn.filereadable(path) == 1 then
++      debug_print("尝试加载库文件: " .. path)
+       
+-  repo_map = Path.repo_map.load(project_root, file_ext)
++      -- 检查文件信息
++      local file_info = vim.fn.system("file " .. path)
++      debug_print("文件信息: " .. file_info)
+       
+-  if not repo_map or next(repo_map) == nil then
+-    build_and_save()
+-    if not repo_map then return end
+-  else
+-    local timer = vim.loop.new_timer()
+-
+-    if timer then
+-      timer:start(
+-        0,
+-        0,
+-        vim.schedule_wrap(function()
+-          build_and_save()
+-          timer:close()
+-        end)
+-      )
+-    end
++      -- 检查文件权限
++      local stat = vim.loop.fs_stat(path)
++      if stat then
++        debug_print("文件权限: " .. string.format("%o", stat.mode))
++        -- 确保文件有执行权限
++        vim.fn.system("chmod 755 " .. path)
+       end
+       
+-  local update_repo_map = vim.schedule_wrap(function(rel_filepath)
+-    if rel_filepath and Utils.is_same_file_ext(file_ext, rel_filepath) then
+-      local abs_filepath = PPath:new(project_root):joinpath(rel_filepath):absolute()
+-      local definitions = repo_map_lib.stringify_definitions(
+-        RepoMap.get_ts_lang(abs_filepath),
+-        Utils.file.read_content(abs_filepath) or ""
+-      )
+-      if definitions == "" then return end
+-      local found = false
+-      for _, m in ipairs(repo_map) do
+-        if m.path == rel_filepath then
+-          m.defs = definitions
+-          found = true
+-          break
++      -- 先尝试使用 require
++      local ok, lib = pcall(require, "avante_repo_map")
++      if ok then
++        debug_print("通过 require 成功加载库文件")
++        repo_map_lib = lib
++        return true
++      else
++        debug_print("通过 require 加载失败: " .. tostring(lib))
++        
++        -- 如果 require 失败，尝试使用 package.loadlib
++        ok, lib = pcall(package.loadlib, path, "luaopen_avante_repo_map")
++        if ok and type(lib) == "function" then
++          debug_print("通过 loadlib 成功加载库文件")
++          local ok2, result = pcall(lib)
++          if ok2 then
++            repo_map_lib = result
++            return true
++          else
++            debug_print("执行 luaopen 函数失败: " .. tostring(result))
+           end
++        else
++          debug_print("通过 loadlib 加载失败: " .. tostring(lib))
+         end
+-      if not found then
+-        table.insert(repo_map, {
+-          path = Utils.relative_path(abs_filepath),
+-          lang = RepoMap.get_filetype(abs_filepath),
+-          defs = definitions,
+-        })
+       end
+-      cache[cache_key] = repo_map
+-      Path.repo_map.save(project_root, file_ext, repo_map)
++    else
++      debug_print("文件不存在: " .. path)
+     end
+-  end)
+-
+-  local handle = vim.loop.new_fs_event()
+-
+-  if handle then
+-    handle:start(project_root, { recursive = true }, function(err, rel_filepath)
+-      if err then
+-        print("Error watching directory " .. project_root .. ":", err)
+-        return
+   end
+   
+-      if rel_filepath then update_repo_map(rel_filepath) end
+-    end)
++  debug_print("所有加载尝试都失败")
++  return false
+ end
+ 
+-  vim.api.nvim_create_autocmd({ "BufReadPost", "BufNewFile" }, {
+-    callback = function(ev)
+-      vim.defer_fn(function()
+-        local ok, filepath = pcall(vim.api.nvim_buf_get_name, ev.buf)
+-        if not ok or not filepath then return end
+-        if not vim.startswith(filepath, project_root) then return end
+-        local rel_filepath = Utils.relative_path(filepath)
+-        update_repo_map(rel_filepath)
+-      end, 0)
+-    end,
+-  })
+-
+-  return repo_map
++-- 确保库已加载的辅助函数
++local function ensure_repo_map_lib()
++  if not load_repo_map() then
++    debug_print("Failed to load repo_map_lib")
++    return false
+   end
+-
+-function RepoMap.show()
+-  local file_ext = vim.fn.expand("%:e")
+-  local repo_map = RepoMap.get_repo_map(file_ext)
+-
+-  if not repo_map or next(repo_map) == nil then
+-    Utils.warn("The repo map is empty or not supported for this language: " .. file_ext)
+-    return
++  return true
+ end
+ 
+-  local popup = Popup({
+-    position = "50%",
+-    enter = true,
+-    focusable = true,
+-    border = {
+-      style = "rounded",
+-      padding = { 1, 1 },
+-      text = {
+-        top = " Avante Repo Map ",
+-        top_align = "center",
+-      },
+-    },
+-    size = {
+-      width = math.floor(vim.o.columns * 0.8),
+-      height = math.floor(vim.o.lines * 0.8),
+-    },
+-  })
+-
+-  popup:mount()
+-
+-  popup:map("n", "q", function() popup:unmount() end, { noremap = true, silent = true })
+-
+-  popup:on(event.BufLeave, function() popup:unmount() end)
+-
+-  -- Format the repo map for display
+-  local lines = {}
+-  for _, entry in ipairs(repo_map) do
+-    table.insert(lines, string.format("Path: %s", entry.path))
+-    table.insert(lines, string.format("Lang: %s", entry.lang))
+-    table.insert(lines, "Defs:")
+-    for def_line in entry.defs:gmatch("[^\r\n]+") do
+-      table.insert(lines, def_line)
+-    end
+-    table.insert(lines, "") -- Add an empty line between entries
++-- 修改原有的函数调用
++RepoMap.stringify_definitions = function(lang, content)
++  if not ensure_repo_map_lib() then 
++    debug_print("Failed to load repo_map_lib, returning empty string")
++    return "" 
+   end
+-
+-  -- Set the buffer content
+-  vim.api.nvim_buf_set_lines(popup.bufnr, 0, -1, false, lines)
++  return repo_map_lib.stringify_definitions(lang, content)
+ end
+ 
  return RepoMap
+diff --git a/lua/avante_lib.lua b/lua/avante_lib.lua
+--- ./lua/avante_lib.lua
++++ ./lua/avante_lib.lua
+@@ -1,20 +1,50 @@
+ local M = {}
+ 
+ local function get_library_path()
+-  local os_name = require("avante.utils").get_os_name()
++  local os_name = vim.loop.os_uname().sysname:lower()
+   local ext = os_name == "linux" and "so" or (os_name == "darwin" and "dylib" or "dll")
+-  local dirname = string.sub(debug.getinfo(1).source, 2, #"/avante_lib.lua" * -1)
+-  return dirname .. ("../build/?.%s"):format(ext)
++  
++  -- 添加调试信息
++  local function debug_print(msg)
++    print(msg)
++    vim.cmd('messages')
++  end
++  
++  -- 只检查本地开发目录的 build 目录
++  local dev_build_path = vim.fn.expand("~/loadrc/avante.nvim/build/avante_repo_map." .. ext)
++  debug_print("Checking build path: " .. dev_build_path)
++  
++  if vim.fn.filereadable(dev_build_path) == 1 then
++    debug_print("Found library in build directory")
++    return dev_build_path:gsub("avante_repo_map%.", "?.")
+   end
+   
+----@type fun(s: string): string
+-local trim_semicolon = function(s) return s:sub(-1) == ";" and s:sub(1, -2) or s end
++  error("Library not found in build directory")
++end
+ 
+ M.load = function()
+-  local library_path = get_library_path()
+-  if not string.find(package.cpath, library_path, 1, true) then
+-    package.cpath = trim_semicolon(package.cpath) .. ";" .. library_path
++  local os_name = vim.loop.os_uname().sysname:lower()
++  local ext = os_name == "linux" and "so" or (os_name == "darwin" and "dylib" or "dll")
++  
++  -- 检测 Neovim 的架构
++  local nvim_info = vim.fn.system("file -b " .. vim.v.progpath)
++  local nvim_arch = nvim_info:match("x86_64") and "x86_64" or "arm64"
++  print("Loading for architecture: " .. nvim_arch)
++  
++  -- 检查本地开发目录
++  local dev_path = vim.fn.expand("~/loadrc/avante.nvim/build/avante_repo_map." .. ext)
++  if vim.fn.filereadable(dev_path) == 1 then
++    local lib_info = vim.fn.system("file -b " .. dev_path)
++    print("Library info: " .. lib_info)
++    
++    if lib_info:match(nvim_arch) then
++      local lib_path = vim.fn.expand("~/loadrc/avante.nvim/build/?." .. ext)
++      package.cpath = package.cpath .. ";" .. lib_path
++      return
+     end
+   end
+   
++  error(string.format("Could not find compatible library (need %s architecture)", nvim_arch))
++end
++
+ return M
