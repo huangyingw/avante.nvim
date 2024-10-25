@@ -1,50 +1,17 @@
 local M = {}
 
-local function get_library_path()
-  local os_name = vim.loop.os_uname().sysname:lower()
-  local ext = os_name == "linux" and "so" or (os_name == "darwin" and "dylib" or "dll")
-  
-  -- 添加调试信息
-  local function debug_print(msg)
-    print(msg)
-    vim.cmd('messages')
-  end
-  
-  -- 只检查本地开发目录的 build 目录
-  local dev_build_path = vim.fn.expand("~/loadrc/avante.nvim/build/avante_repo_map." .. ext)
-  debug_print("Checking build path: " .. dev_build_path)
-  
-  if vim.fn.filereadable(dev_build_path) == 1 then
-    debug_print("Found library in build directory")
-    return dev_build_path:gsub("avante_repo_map%.", "?.")
-  end
-  
-  error("Library not found in build directory")
-end
-
 M.load = function()
   local os_name = vim.loop.os_uname().sysname:lower()
   local ext = os_name == "linux" and "so" or (os_name == "darwin" and "dylib" or "dll")
   
-  -- 检测 Neovim 的架构
-  local nvim_info = vim.fn.system("file -b " .. vim.v.progpath)
-  local nvim_arch = nvim_info:match("x86_64") and "x86_64" or "arm64"
-  print("Loading for architecture: " .. nvim_arch)
-  
-  -- 检查本地开发目录
   local dev_path = vim.fn.expand("~/loadrc/avante.nvim/build/avante_repo_map." .. ext)
   if vim.fn.filereadable(dev_path) == 1 then
-    local lib_info = vim.fn.system("file -b " .. dev_path)
-    print("Library info: " .. lib_info)
-    
-    if lib_info:match(nvim_arch) then
-      local lib_path = vim.fn.expand("~/loadrc/avante.nvim/build/?." .. ext)
-      package.cpath = package.cpath .. ";" .. lib_path
-      return
-    end
+    local lib_path = vim.fn.expand("~/loadrc/avante.nvim/build/?." .. ext)
+    package.cpath = package.cpath .. ";" .. lib_path
+    return
   end
   
-  error(string.format("Could not find compatible library (need %s architecture)", nvim_arch))
+  error("Could not find library in build directory")
 end
 
 return M
