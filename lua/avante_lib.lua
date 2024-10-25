@@ -1,17 +1,20 @@
 local M = {}
 
-M.load = function()
-  local os_name = vim.loop.os_uname().sysname:lower()
+local function get_library_path()
+  local os_name = require("avante.utils").get_os_name()
   local ext = os_name == "linux" and "so" or (os_name == "darwin" and "dylib" or "dll")
-  
-  local dev_path = vim.fn.expand("~/loadrc/avante.nvim/build/avante_repo_map." .. ext)
-  if vim.fn.filereadable(dev_path) == 1 then
-    local lib_path = vim.fn.expand("~/loadrc/avante.nvim/build/?." .. ext)
-    package.cpath = package.cpath .. ";" .. lib_path
-    return
+  local dirname = string.sub(debug.getinfo(1).source, 2, #"/avante_lib.lua" * -1)
+  return dirname .. ("../build/?.%s"):format(ext)
+end
+
+---@type fun(s: string): string
+local trim_semicolon = function(s) return s:sub(-1) == ";" and s:sub(1, -2) or s end
+
+M.load = function()
+  local library_path = get_library_path()
+  if not string.find(package.cpath, library_path, 1, true) then
+    package.cpath = trim_semicolon(package.cpath) .. ";" .. library_path
   end
-  
-  error("Could not find library in build directory")
 end
 
 return M
