@@ -16,6 +16,15 @@ require('keymaps')
 require('nvim_molten_config')
 -- require('secret_config')
 
+-- 在文件顶部添加
+local function debug_print(msg)
+  print(msg)
+  vim.cmd('messages')
+end
+
+-- 设置一个标志来跟踪是否已经设置
+local setup_done = false
+
 -- 引导 lazy.nvim
 local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
 if not vim.loop.fs_stat(lazypath) then
@@ -34,13 +43,74 @@ vim.opt.rtp:prepend(lazypath)
 require("lazy").setup({
   {
     "yetone/avante.nvim",
+    dir = "~/loadrc/avante.nvim",
     event = "VeryLazy",
     lazy = false,
     version = false,
-    opts = {
-      -- 在这里添加任何选项
-    },
-    build = "make BUILD_FROM_SOURCE=true",
+    opts = {},
+    config = function()
+      -- 防止重复设置
+      if setup_done then
+        return
+      end
+
+      -- 检查 avante_lib
+      debug_print("Attempting to load avante_lib")
+      local ok, lib = pcall(require, 'avante_lib')
+      if not ok then
+        debug_print("Failed to load avante_lib: " .. tostring(lib))
+        return
+      end
+      debug_print("Successfully loaded avante_lib")
+
+      -- 加载库
+      lib.load()
+
+      -- 先加载 repo_map 模块
+      debug_print("Loading repo_map module")
+      ok, repo_map = pcall(require, "avante.repo_map")
+      if not ok then
+        debug_print("Failed to load repo_map: " .. tostring(repo_map))
+        return
+      end
+
+      -- 添加 setup 函数
+      if not repo_map.setup then
+        repo_map.setup = function() 
+          debug_print("Setting up repo_map")
+          return true
+        end
+      end
+
+      -- 延迟加载和设置
+      vim.defer_fn(function()
+        -- 检查 avante 模块
+        debug_print("Attempting to require avante")
+        local ok, avante = pcall(require, 'avante')
+        if not ok then
+          debug_print("Failed to require avante: " .. tostring(avante))
+          return
+        end
+        
+        -- 检查 setup 函数
+        debug_print("Checking avante module")
+        if type(avante.setup) ~= "function" then
+          debug_print("avante.setup is not a function: " .. type(avante.setup))
+          return
+        end
+        
+        -- 使用保存的引用调用 setup
+        ok, err = pcall(function()
+          avante.setup({})
+        end)
+        if not ok then
+          debug_print("Failed to setup avante: " .. tostring(err))
+        else
+          debug_print("Successfully setup avante")
+          setup_done = true
+        end
+      end, 100)
+    end,
     dependencies = {
       "nvim-treesitter/nvim-treesitter",
       "stevearc/dressing.nvim",
@@ -73,36 +143,5 @@ require("lazy").setup({
   },
 })
 
--- 在文件顶部添加
-local function debug_print(msg)
-  print(msg)
-  vim.cmd('messages')
-end
-
--- 在加载 avante_lib 之前添加
-debug_print("Attempting to load avante_lib")
-local ok, err = pcall(require, 'avante_lib')
-if not ok then
-  debug_print("Failed to load avante_lib: " .. tostring(err))
-else
-  debug_print("Successfully loaded avante_lib")
-end
-
--- 加载 avante_lib
-require('avante_lib').load()
-
--- 在设置 avante 之前添加
-debug_print("Attempting to setup avante")
-ok, err = pcall(require('avante').setup, {
-  -- 您的配置在这里
-})
-if not ok then
-  debug_print("Failed to setup avante: " .. tostring(err))
-else
-  debug_print("Successfully setup avante")
-end
-
 -- 设置推荐的 Neovim 选项
 vim.opt.laststatus = 3
-
-package.cpath = package.cpath .. ";" .. vim.fn.stdpath("data") .. "/lazy/avante.nvim/lua/avante/?.dylib"
