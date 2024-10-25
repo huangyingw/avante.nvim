@@ -10,26 +10,16 @@ local function get_library_path()
     vim.cmd('messages')
   end
   
-  -- 检查本地开发目录的 build 目录
+  -- 只检查本地开发目录的 build 目录
   local dev_build_path = vim.fn.expand("~/loadrc/avante.nvim/build/avante_repo_map." .. ext)
   debug_print("Checking build path: " .. dev_build_path)
   
   if vim.fn.filereadable(dev_build_path) == 1 then
-    -- 如果文件存在于 build 目录，直接使用
     debug_print("Found library in build directory")
     return dev_build_path:gsub("avante_repo_map%.", "?.")
   end
   
-  -- 检查插件目录
-  local plugin_path = vim.fn.stdpath("data") .. "/lazy/avante.nvim/lua/avante/avante_repo_map." .. ext
-  debug_print("Checking plugin path: " .. plugin_path)
-  
-  if vim.fn.filereadable(plugin_path) == 1 then
-    debug_print("Found library in plugin directory")
-    return plugin_path:gsub("avante_repo_map%.", "?.")
-  end
-  
-  error("Library not found in any location")
+  error("Library not found in build directory")
 end
 
 M.load = function()
