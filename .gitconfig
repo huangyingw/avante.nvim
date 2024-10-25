@@ -1,0 +1,22 @@
+[deploy]
+  host = localhost
+  path = ~/loadrc/avante.nvim
+[remote "github"]
+  url = git@github.com:huangyingw/avante.nvim.git
+  fetch = +refs/heads/*:refs/remotes/github/*
+[push]
+  remote = github
+[remote "origin"]
+  url = git@github.com:yetone/avante.nvim.git
+  fetch = +refs/heads/*:refs/remotes/origin/*
+[gsync]
+    remote = origin
+    target = origin/main
+[gdio]
+  ignore = ./.config/nvim/init.lua
+  ignore = ./.cursorrules
+  ignore = ./.gitignore
+  ignore = ./.vimrc
+  ignore = ./Dockerfile
+  ignore = ./docker-compose.yml
+  ignore = ./install.sh
