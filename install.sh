@@ -75,15 +75,31 @@ build_avante() {
     log_info "Building avante.nvim..."
 
     cd ~/loadrc/avante.nvim
+    make clean
 
-    # 检查是否需要从源码构建
-    if [ "$BUILD_FROM_SOURCE" = "true" ]; then
-        make clean
-        make BUILD_FROM_SOURCE=true
-    else
-        # 使用预编译的二进制文件
-        bash ./build.sh
+    # 添加更详细的构建信息
+    log_info "Running make with BUILD_FROM_SOURCE=true..."
+    if ! make BUILD_FROM_SOURCE=true; then
+        log_error "Build failed!"
+        return 1
     fi
+
+    # 验证构建文件是否存在
+    local os_name=$(uname -s)
+    local ext="so"
+    if [ "$os_name" = "Darwin" ]; then
+        ext="dylib"
+    elif [ "$os_name" = "Windows_NT" ]; then
+        ext="dll"
+    fi
+
+    local lib_path="$HOME/loadrc/avante.nvim/build/avante_repo_map.$ext"
+    if [ ! -f "$lib_path" ]; then
+        log_error "Built library not found at: $lib_path"
+        return 1
+    fi
+
+    log_info "Build completed successfully. Library created at: $lib_path"
 }
 
 # 主函数
