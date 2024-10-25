@@ -15,6 +15,7 @@
 [gdio]
   ignore = ./.config/nvim/init.lua
   ignore = ./.cursorrules
+  ignore = ./.gitconfig
   ignore = ./.gitignore
   ignore = ./.vimrc
   ignore = ./Dockerfile
