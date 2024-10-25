@@ -34,6 +34,21 @@ local function load_repo_map()
   return false
 end
 
+function RepoMap.get_ts_lang(filepath)
+  local filetype = RepoMap.get_filetype(filepath)
+  return filetype_map[filetype] or filetype
+end
+
+function RepoMap.get_filetype(filepath)
+  local filetype = vim.filetype.match({ filename = filepath })
+  if not filetype then
+    local ext = fn.fnamemodify(filepath, ":e")
+    if ext == "tsx" then filetype = "typescriptreact" end
+    if ext == "ts" then filetype = "typescript" end
+  end
+  return filetype
+end
+
 RepoMap.stringify_definitions = function(lang, content)
   if not load_repo_map() then return "" end
   return repo_map_lib.stringify_definitions(lang, content)
