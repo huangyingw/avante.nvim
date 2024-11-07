@@ -77,10 +77,41 @@ require("lazy").setup({
         end
 
         ok, err = pcall(function()
-          avante.setup({})
+          avante.setup({
+            debug = true,
+            provider = "claude",
+            claude = {
+              endpoint = "https://api.anthropic.com/v1",
+              model = "claude-3-5-sonnet-20241022",
+              timeout = 30000,
+              temperature = 0,
+              max_tokens = 4096,
+              on_error = function(result)
+                -- 直接打印错误信息
+                if result.body then
+                  local ok, body = pcall(vim.json.decode, result.body)
+                  if ok and body and body.error then
+                    vim.notify(
+                      "Claude API Error: " .. body.error.message,
+                      vim.log.levels.ERROR,
+                      { title = "Avante" }
+                    )
+                  end
+                end
+                -- 记录到日志
+                vim.fn.writefile(
+                  {vim.fn.strftime("%Y-%m-%d %H:%M:%S") .. " Error: " .. vim.inspect(result)},
+                  vim.fn.stdpath("state") .. "/avante.log",
+                  "a"
+                )
+              end
+            }
+          })
         end)
         if ok then
           setup_done = true
+        else
+          print("Avante setup error:", err)
         end
       end, 100)
     end,
@@ -113,6 +144,10 @@ require("lazy").setup({
         ft = { "markdown", "Avante" },
       },
     },
+  },
+  {
+    "pseewald/vim-anyfold",
+    event = "VeryLazy",
   },
 })
 
