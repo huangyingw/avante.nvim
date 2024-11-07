@@ -1,7 +1,19 @@
-# avante.nvim
+<div align="center">
+  <img alt="logo" width="120" src="https://github.com/user-attachments/assets/2e2f2a58-2b28-4d11-afd1-87b65612b2de" />
+  <h1>avante.nvim</h1>
+</div>
 
-[![neovim: v0.10+](https://img.shields.io/static/v1?style=flat-square&label=neovim&message=v0.10%2b&logo=neovim&labelColor=282828&logoColor=8faa80&color=414b32)](https://neovim.io/)
-[![CI status](https://img.shields.io/github/actions/workflow/status/yetone/avante.nvim/ci.yaml?style=flat-square&logo=github&logoColor=c7c7c7&label=CI&labelColor=282828&event=push)](https://github.com/yetone/avante.nvim/actions/workflows/ci.yaml)
+<div align="center">
+  <a href="https://neovim.io/" target="_blank">
+    <img src="https://img.shields.io/static/v1?style=flat-square&label=Neovim&message=v0.10%2b&logo=neovim&labelColor=282828&logoColor=8faa80&color=414b32" alt="Neovim: v0.10+" />
+  </a>
+  <a href="https://github.com/yetone/avante.nvim/actions/workflows/ci.yaml" target="_blank">
+    <img src="https://img.shields.io/github/actions/workflow/status/yetone/avante.nvim/ci.yaml?style=flat-square&logo=github&logoColor=c7c7c7&label=CI&labelColor=282828&color=347D39&event=push" alt="CI status" />
+  </a>
+  <a href="https://discordapp.com/channels/1302530866362323016" target="_blank">
+    <img src="https://img.shields.io/discord/1302530866362323016?style=flat-square&logo=discord&label=Discord&logoColor=ffffff&labelColor=7376CF&color=268165" alt="Discord" />
+  </a>
+</div>
 
 **avante.nvim** is a Neovim plugin designed to emulate the behaviour of the [Cursor](https://www.cursor.com) AI IDE. It provides users with AI-driven code suggestions and the ability to apply these recommendations directly to their source files with minimal effort.
 
@@ -118,7 +130,7 @@ add({
     'MunifTanjim/nui.nvim',
     'echasnovski/mini.icons'
   },
-  hooks = { post_checkout = function() vim.cmd('AvanteBuild source=false') end }
+  hooks = { post_checkout = function() vim.cmd('make') end }
 })
 --- optional
 add({ source = 'zbirenbaum/copilot.lua' })
@@ -157,12 +169,9 @@ require('avante').setup ({
 })
 ```
 
-</details>
+**NOTE**: For <code>avante.tokenizers</code> and templates to work, make sure to call <code>require('avante_lib').load()</code> somewhere when entering the editor. We will leave the users to decide where it fits to do this, as this varies among configurations. (But we do recommend running this after where you set your colorscheme)
 
-> [!IMPORTANT]
->
-> For `avante.tokenizers` and templates to work, make sure to call `require('avante_lib').load()` somewhere when entering the editor.
-> We will leave the users to decide where it fits to do this, as this varies among configurations. (But we do recommend running this after where you set your colorscheme)
+</details>
 
 > [!IMPORTANT]
 >
@@ -175,21 +184,6 @@ require('avante').setup ({
 > ```lua
 > -- views can only be fully collapsed with the global statusline
 > vim.opt.laststatus = 3
-> ```
-
-> [!NOTE]
->
-> `render-markdown.nvim` is an optional dependency that is used to render the markdown content of the chat history. Make sure to also include `Avante` as a filetype
-> to its setup (e.g. via Lazy):
->
-> ```lua
-> {
->   "MeanderingProgrammer/render-markdown.nvim",
->   opts = {
->     file_types = { "markdown", "Avante" },
->   },
->   ft = { "markdown", "Avante" },
-> }
 > ```
 
 > [!TIP]
@@ -263,6 +257,7 @@ _See [config.lua#L9](./lua/avante/config.lua) for the full config_
     },
     input = {
       prefix = "> ",
+      height = 8, -- Height of the input window in vertical layout
     },
     edit = {
       border = "rounded",
@@ -270,8 +265,10 @@ _See [config.lua#L9](./lua/avante/config.lua) for the full config_
     },
     ask = {
       floating = false, -- Open the 'AvanteAsk' prompt in a floating window
-      start_insert = true, -- Start insert mode when opening the ask window, only effective if floating = true.
+      start_insert = true, -- Start insert mode when opening the ask window
       border = "rounded",
+      ---@type "ours" | "theirs"
+      focus_on_apply = "ours", -- which diff to focus after applying
     },
   },
   highlights = {
@@ -286,6 +283,10 @@ _See [config.lua#L9](./lua/avante/config.lua) for the full config_
     autojump = true,
     ---@type string | fun(): any
     list_opener = "copen",
+    --- Override the 'timeoutlen' setting while hovering over a diff (see :help timeoutlen).
+    --- Helps to avoid entering operator-pending mode with diff mappings starting with `c`.
+    --- Disable by setting to -1.
+    override_timeoutlen = 500,
   },
 }
 ```
@@ -444,6 +445,7 @@ If you have the following structure:
 - [x] Edit the selected block
 - [x] Smart Tab (Cursor Flow)
 - [x] Chat with project (You can use `@codebase` to chat with the whole project)
+- [ ] CoT
 - [ ] Chat with selected files
 
 ## Roadmap

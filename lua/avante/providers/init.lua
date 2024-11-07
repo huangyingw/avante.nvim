@@ -14,18 +14,14 @@ local DressingState = { winid = nil, input_winid = nil, input_bufnr = nil }
 ---@field on_chunk AvanteChunkParser
 ---@field on_complete AvanteCompleteParser
 ---
----@class AvantePromptOptions: table<[string], string>
----@field system_prompt string
----@field user_prompts string[]
----@field image_paths? string[]
----
----@class AvanteBaseMessage
----@field role "user" | "system"
+---@class AvanteLLMMessage
+---@field role "user" | "assistant"
 ---@field content string
 ---
----@class AvanteClaudeMessage: AvanteBaseMessage
----@field role "user"
----@field content {type: "text", text: string, cache_control?: {type: "ephemeral"}}[]
+---@class AvantePromptOptions: table<[string], string>
+---@field system_prompt string
+---@field messages AvanteLLMMessage[]
+---@field image_paths? string[]
 ---
 ---@class AvanteGeminiMessage
 ---@field role "user"
@@ -33,7 +29,7 @@ local DressingState = { winid = nil, input_winid = nil, input_bufnr = nil }
 ---
 ---@alias AvanteChatMessage AvanteClaudeMessage | OpenAIMessage | AvanteGeminiMessage
 ---
----@alias AvanteMessageParser fun(opts: AvantePromptOptions): AvanteChatMessage[]
+---@alias AvanteMessagesParser fun(opts: AvantePromptOptions): AvanteChatMessage[]
 ---
 ---@class AvanteCurlOutput: {url: string, proxy: string, insecure: boolean, body: table<string, any> | string, headers: table<string, string>}
 ---@alias AvanteCurlArgsParser fun(opts: AvanteProvider | AvanteProviderFunctor, code_opts: AvantePromptOptions): AvanteCurlOutput
@@ -69,7 +65,8 @@ local DressingState = { winid = nil, input_winid = nil, input_bufnr = nil }
 ---@field parse_api_key? fun(): string | nil
 ---
 ---@class AvanteProviderFunctor
----@field parse_message AvanteMessageParser
+---@field role_map table<"user" | "assistant", string>
+---@field parse_messages AvanteMessagesParser
 ---@field parse_response AvanteResponseParser
 ---@field parse_curl_args AvanteCurlArgsParser
 ---@field setup fun(): nil
@@ -80,11 +77,12 @@ local DressingState = { winid = nil, input_winid = nil, input_bufnr = nil }
 ---@field model? string
 ---@field parse_api_key fun(): string | nil
 ---@field parse_stream_data? AvanteStreamParser
----@field on_error? fun(result: table): nil
+---@field on_error? fun(result: table<string, any>): nil
 ---
 ---@class avante.Providers
 ---@field openai AvanteProviderFunctor
 ---@field claude AvanteProviderFunctor
+---@field copilot AvanteProviderFunctor
 ---@field azure AvanteProviderFunctor
 ---@field gemini AvanteProviderFunctor
 ---@field cohere AvanteProviderFunctor
