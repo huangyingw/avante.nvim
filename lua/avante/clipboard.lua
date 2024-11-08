@@ -69,4 +69,11 @@ M.get_base64_content = function(filepath)
   end
 end
 
+M.get_paste_status = function()
+  if vim.bo.filetype == 'AvanteInput' then
+    return "Paste Mode: Image Ready"
+  end
+  return ""
+end
+
 return M

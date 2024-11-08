@@ -271,10 +271,9 @@ local spinner_chars = {
   "⢰",
   "⣰",
   "⢴",
-  "⢲",
   "⢱",
   "⢸",
-  "⣸",
+  "⣹",
   "⢼",
   "⢺",
   "⢹",
@@ -859,7 +858,7 @@ function Sidebar:on_mount(opts)
   })
 
   self:render_result()
-  self:render_input(opts.ask)
+  self:render_input(opts)
   self:render_selected_code()
 
   local filetype = api.nvim_get_option_value("filetype", { buf = self.code.bufnr })
@@ -978,6 +977,105 @@ function Sidebar:initialize()
   self.code.winid = api.nvim_get_current_win()
   self.code.bufnr = api.nvim_get_current_buf()
   self.code.selection = Utils.get_visual_selection_and_range()
+
+  -- 创建 input 组件
+  self.input = Split({
+    relative = "editor",
+    position = "bottom",
+    size = 3,
+    win_options = {
+      number = false,
+      relativenumber = false,
+      cursorline = false,
+      cursorcolumn = false,
+      foldcolumn = "0",
+      signcolumn = "yes",
+      wrap = true,
+    },
+    buf_options = {
+      filetype = "AvanteInput",
+      buftype = "nofile",
+      swapfile = false,
+    },
+  })
+
+  -- 添加调试信息
+  print("Input buffer created with bufnr:", self.input.bufnr)
+
+  -- 创建自动命令组
+  local augroup = vim.api.nvim_create_augroup("AvantePaste_" .. self.input.bufnr, { clear = true })
+
+  -- 监听剪贴板变化
+  vim.api.nvim_create_autocmd({"TextYankPost", "TextChanged", "TextChangedI"}, {
+    group = augroup,
+    buffer = self.input.bufnr,
+    callback = function(ev)
+      print("Event triggered:", ev.event)
+      
+      -- 检查是否在粘贴模式
+      if vim.o.paste then
+        print("Paste mode detected")
+        local ok, result = pcall(function()
+          return require('avante.clipboard').paste_image()
+        end)
+        print("Paste attempt result:", ok, result)
+        
+        -- 重置粘贴模式
+        vim.o.paste = false
+      end
+    end
+  })
+
+  -- 设置特殊的粘贴处理
+  local function setup_paste_handlers()
+    -- 使用 expr 映射来检测粘贴
+    vim.keymap.set('i', '<C-R>', function()
+      print("Ctrl-R triggered")
+      return vim.fn.nr2char(18) -- 返回实际的 <C-R>
+    end, { buffer = self.input.bufnr, expr = true })
+
+    -- 监听寄存器访问
+    vim.keymap.set('i', '<C-R>+', function()
+      print("Attempting to paste from + register")
+      local ok, result = pcall(function()
+        return require('avante.clipboard').paste_image()
+      end)
+      if not ok or not result then
+        -- 如果不是图片，执行普通粘贴
+        return vim.fn.getreg('+')
+      end
+      return ''
+    end, { buffer = self.input.bufnr, expr = true })
+  end
+
+  -- 在插入模式下设置处理器
+  vim.api.nvim_create_autocmd("InsertEnter", {
+    group = augroup,
+    buffer = self.input.bufnr,
+    callback = setup_paste_handlers
+  })
+
+  -- 添加命令用于测试
+  vim.api.nvim_buf_create_user_command(self.input.bufnr, 'AvantePaste', function()
+    print("AvantePaste command executed")
+    require('avante.clipboard').paste_image()
+  end, {})
+
+  -- 设置 input buffer 的其他选项
+  api.nvim_buf_set_option(self.input.bufnr, 'modifiable', true)
+  api.nvim_buf_set_option(self.input.bufnr, 'readonly', false)
+
+  -- 监听按键事件（用于调试）
+  vim.on_key(function(key)
+    if vim.api.nvim_get_current_buf() == self.input.bufnr then
+      print("Key pressed in input buffer:", vim.inspect(key))
+    end
+  end, self.input.ns)
+
+  -- 添加状态栏提示
+  vim.api.nvim_win_set_option(self.input.winid, 'statusline', '%=%{v:lua.require("avante.clipboard").get_paste_status()}')
+
+  self:refresh_winids()
 
   return self
 end
@@ -1654,6 +1752,13 @@ function Sidebar:create_input(opts)
       if ev.data and ev.data.request then handle_submit(ev.data.request) end
     end,
   })
+
+  -- 在 input buffer 创建后添加映射
+  if vim.fn.has('mac') == 1 then
+    vim.api.nvim_buf_set_keymap(self.input.bufnr, 'i', '<D-v>', 
+      [[<Cmd>lua require('avante.clipboard').paste_image()<CR>]], 
+      { noremap = true, silent = false })
+  end
 
   self:refresh_winids()
 end
