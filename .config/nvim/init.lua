@@ -14,8 +14,6 @@ vim.cmd 'source ~/.vimrc'
 require('plugins')
 require('keymaps')
 require('nvim_molten_config')
--- require('secret_config')
-
 
 -- 设置一个标志来跟踪是否已经设置
 local setup_done = false
@@ -66,6 +64,9 @@ require("lazy").setup({
         end
       end
 
+      -- 定义图片保存路径
+      local image_save_path = vim.fn.stdpath("data") .. "/avante/images"
+
       vim.defer_fn(function()
         local ok, avante = pcall(require, 'avante')
         if not ok then
@@ -80,6 +81,9 @@ require("lazy").setup({
           avante.setup({
             debug = true,
             provider = "claude",
+            behaviour = {
+              support_paste_from_clipboard = true, -- 启用图片粘贴功能
+            },
             claude = {
               endpoint = "https://api.anthropic.com/v1",
               model = "claude-3-5-sonnet-20241022",
@@ -87,7 +91,6 @@ require("lazy").setup({
               temperature = 0,
               max_tokens = 4096,
               on_error = function(result)
-                -- 直接打印错误信息
                 if result.body then
                   local ok, body = pcall(vim.json.decode, result.body)
                   if ok and body and body.error then
@@ -98,7 +101,6 @@ require("lazy").setup({
                     )
                   end
                 end
-                -- 记录到日志
                 vim.fn.writefile(
                   {vim.fn.strftime("%Y-%m-%d %H:%M:%S") .. " Error: " .. vim.inspect(result)},
                   vim.fn.stdpath("state") .. "/avante.log",
@@ -110,6 +112,31 @@ require("lazy").setup({
         end)
         if ok then
           setup_done = true
+          
+          -- 设置 AvanteInput 缓冲区的 ctrl+v 处理
+          vim.api.nvim_create_autocmd("FileType", {
+            pattern = "AvanteInput",
+            callback = function()
+              vim.keymap.set({"n", "i"}, "<C-v>", function()
+                local ok, img_clip = pcall(require, "img-clip")
+                if not ok then
+                  -- 如果 img-clip 加载失败，使用系统默认粘贴
+                  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-v>", true, true, true), "m", true)
+                  return
+                end
+                
+                local result = img_clip.paste_image({
+                  dir_path = image_save_path,  -- 使用变量
+                  use_absolute_path = true,
+                  show_notification = true,
+                })
+                if not result then
+                  -- 如果图片粘贴失败，使用系统默认粘贴
+                  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-v>", true, true, true), "m", true)
+                end
+              end, { buffer = true, noremap = true })
+            end,
+          })
         else
           print("Avante setup error:", err)
         end
@@ -133,6 +160,7 @@ require("lazy").setup({
               insert_mode = true,
             },
             use_absolute_path = true,
+            dir_path = image_save_path,  -- 使用相同的变量
           },
         },
       },
