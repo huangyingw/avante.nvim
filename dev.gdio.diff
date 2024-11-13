@@ -19,3 +19,42 @@ diff --git a/README.md b/README.md
  avante.nvim is licensed under the Apache 2.0 License. For more details, please refer to the [LICENSE](./LICENSE) file.
 +
 +帮我设计一个二分查找算法.
+diff --git a/lua/avante/prompt_input.lua b/lua/avante/prompt_input.lua
+--- ./lua/avante/prompt_input.lua
++++ ./lua/avante/prompt_input.lua
+@@ -145,9 +145,32 @@ function PromptInput:cancel()
+   if self.cancel_callback then self.cancel_callback() end
+ end
+ 
+-function PromptInput:submit(input)
+-  if self.close_on_submit then self:close() end
+-  if self.submit_callback then self.submit_callback(input) end
++ -- 找到 submit 函数，大约在第 150 行
++function PromptInput:submit()
++  local lines = vim.api.nvim_buf_get_lines(self.bufnr, 0, -1, false)
++  local input = table.concat(lines, "\n")
++
++  -- 修改这里，确保数据格式正确
++  local data = {
++    question = input,
++    mode = "asking"
++  }
++
++  -- 记录日志
++  vim.fn.writefile(
++    {vim.fn.strftime("%Y-%m-%d %H:%M:%S") .. " Submit data: " .. vim.inspect(data)},
++    vim.fn.stdpath("state") .. "/avante.log",
++    "a"
++  )
++
++  -- 触发事件
++  vim.api.nvim_exec_autocmds("User", {
++    pattern = "AvanteInputSubmitted",
++    data = data
++  })
++
++  -- 关闭输入缓冲区
++  vim.api.nvim_buf_delete(self.bufnr, { force = true })
+ end
+ 
+ function PromptInput:show_shortcuts_hints()
