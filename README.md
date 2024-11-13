@@ -481,3 +481,5 @@ The high quality and ingenuity of these projects' source code have been immensel
 ## License
 
 avante.nvim is licensed under the Apache 2.0 License. For more details, please refer to the [LICENSE](./LICENSE) file.
+
+帮我设计一个二分查找算法.
