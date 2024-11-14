@@ -32,6 +32,9 @@ if not vim.loop.fs_stat(lazypath) then
 end
 vim.opt.rtp:prepend(lazypath)
 
+-- 将变量定义移到更外层作用域
+local image_save_path = vim.fn.stdpath("data") .. "/avante/images"
+
 -- 设置插件
 require("lazy").setup({
   {
@@ -63,9 +66,6 @@ require("lazy").setup({
           return true
         end
       end
-
-      -- 定义图片保存路径
-      local image_save_path = vim.fn.stdpath("data") .. "/avante/images"
 
       vim.defer_fn(function()
         local ok, avante = pcall(require, 'avante')
