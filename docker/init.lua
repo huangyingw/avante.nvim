@@ -8,14 +8,6 @@ vim.o.termguicolors = false
 -- 设置当前的颜色方案为 'vim'
 vim.cmd('colorscheme vim')
 
-vim.cmd 'source ~/.vim/plugin/common.vim'
-vim.cmd 'source ~/.vimrc'
-
-require('plugins')
-require('keymaps')
-require('nvim_molten_config')
--- require('secret_config')
-
 -- 在文件开始添加调试函数
 local function debug_print(msg)
   print(msg)
@@ -73,10 +65,10 @@ local function setup_lib_path()
   end
 
   -- 检查本地开发目录
-  local dev_path = vim.fn.expand("~/loadrc/avante.nvim/build/avante_repo_map." .. ext)
+  local dev_path = "/root/avante.nvim/build/avante_repo_map." .. ext
   debug_print("Checking build path: " .. dev_path)
   if verify_lib(dev_path) then
-    local lib_path = vim.fn.expand("~/loadrc/avante.nvim/build/?." .. ext)
+    local lib_path = "/root/avante.nvim/build/?." .. ext
     package.cpath = package.cpath .. ";" .. lib_path
     debug_print("Package cpath after: " .. package.cpath)
     debug_print("Using build directory library")
@@ -115,7 +107,7 @@ vim.opt.rtp:prepend(lazypath)
 require("lazy").setup({
   {
     "yetone/avante.nvim",
-    dir = "~/loadrc/avante.nvim",  -- 使用本地目录
+    dir = "/root/avante.nvim",  -- 修改为容器内的绝对路径
     event = "VeryLazy",
     lazy = false,
     version = false,
@@ -124,15 +116,9 @@ require("lazy").setup({
       local os_name = vim.loop.os_uname().sysname:lower()
       local ext = os_name == "linux" and "so" or (os_name == "darwin" and "dylib" or "dll")
 
-      -- 检测 Neovim 的架构
-      local nvim_info = vim.fn.system("file -b " .. vim.v.progpath)
-      local nvim_arch = nvim_info:match("x86_64") and "x86_64" or "arm64"
-      print("Building for architecture: " .. nvim_arch)
-
-      -- 构建命令
+      -- 修改构建命令使用新路径
       local build_cmd = string.format(
-        "cd ~/loadrc/avante.nvim && make clean && make luajit BUILD_FROM_SOURCE=true",
-        nvim_arch
+        "cd /root/avante.nvim && make clean && make luajit BUILD_FROM_SOURCE=true"
       )
       print("Running build command: " .. build_cmd)
 
@@ -144,8 +130,8 @@ require("lazy").setup({
         error("Build failed: " .. result)
       end
 
-      -- 验证构建结果
-      local build_path = vim.fn.expand("~/loadrc/avante.nvim/build/avante_repo_map." .. ext)
+      -- 验证构建结果使用新路径
+      local build_path = "/root/avante.nvim/build/avante_repo_map." .. ext
       if vim.fn.filereadable(build_path) ~= 1 then
         error("Build succeeded but library file not found: " .. build_path)
       end

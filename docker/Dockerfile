@@ -41,8 +41,11 @@ RUN mkdir -p /root/.config/nvim
 RUN git clone --filter=blob:none https://github.com/folke/lazy.nvim.git \
     --branch=stable /root/.local/share/nvim/lazy/lazy.nvim
 
-# 复制 Neovim 配置
-COPY init.lua /root/.config/nvim/init.lua
+# 复制 init.lua
+COPY docker/init.lua /root/.config/nvim/init.lua
+
+# 复制整个项目目录（排除 docker 目录）
+COPY . /root/avante.nvim/
 
 # 设置工作目录
 WORKDIR /root/workspace
@@ -66,11 +69,16 @@ ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games:/snap/bin:/ro
 # 安装 avante.nvim 并编译
 RUN nvim --headless -c "lua require('lazy').sync()" -c "qa"
 
-# 手动编译 avante.nvim
-RUN cd /root/.local/share/nvim/lazy/avante.nvim && \
+# 确认插件安装成功
+RUN ls -la /root/.local/share/nvim/lazy/
+
+# 如果 avante.nvim 存在，再进行编译
+RUN if [ -d "/root/.local/share/nvim/lazy/avante.nvim" ]; then \
+    cd /root/.local/share/nvim/lazy/avante.nvim && \
     make clean && \
     make BUILD_FROM_SOURCE=true && \
-    ls -l lua/avante/
+    ls -l lua/avante/ \
+    ; fi
 
 # 验证编译结果
 RUN ls -la /root/.local/share/nvim/lazy/avante.nvim
