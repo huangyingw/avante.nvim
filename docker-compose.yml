@@ -1,7 +1,11 @@
 version: '3'
 services:
   neovim:
-    build: .
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      args:
+        - DOCKER_BUILDKIT=1
     volumes:
       - ./workspace:/root/workspace
     tty: true
