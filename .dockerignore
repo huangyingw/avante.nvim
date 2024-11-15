@@ -1,4 +1,6 @@
-docker/
 .git/
-build/
+.github/
 target/
+build/
+workspace/
+!docker/init.lua
