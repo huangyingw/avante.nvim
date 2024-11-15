@@ -47,6 +47,13 @@ COPY docker/init.lua /root/.config/nvim/init.lua
 # 复制整个项目目录（排除 docker 目录）
 COPY . /root/avante.nvim/
 
+# 复制项目到插件目录
+COPY . /root/.local/share/nvim/lazy/avante.nvim/
+
+# 构建插件
+WORKDIR /root/.local/share/nvim/lazy/avante.nvim
+RUN make clean && make BUILD_FROM_SOURCE=true
+
 # 设置工作目录
 WORKDIR /root/workspace
 
