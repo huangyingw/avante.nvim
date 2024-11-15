@@ -65,10 +65,10 @@ local function setup_lib_path()
   end
 
   -- 检查本地开发目录
-  local dev_path = "/root/avante.nvim/build/avante_repo_map." .. ext
+  local dev_path = "/root/.local/share/nvim/lazy/avante.nvim/build/avante_repo_map." .. ext
   debug_print("Checking build path: " .. dev_path)
   if verify_lib(dev_path) then
-    local lib_path = "/root/avante.nvim/build/?." .. ext
+    local lib_path = "/root/.local/share/nvim/lazy/avante.nvim/build/?." .. ext
     package.cpath = package.cpath .. ";" .. lib_path
     debug_print("Package cpath after: " .. package.cpath)
     debug_print("Using build directory library")
@@ -107,7 +107,7 @@ vim.opt.rtp:prepend(lazypath)
 require("lazy").setup({
   {
     "yetone/avante.nvim",
-    dir = "/root/avante.nvim",  -- 修改为容器内的绝对路径
+    dir = "/root/.local/share/nvim/lazy/avante.nvim",  -- 修改为容器内的绝对路径
     event = "VeryLazy",
     lazy = false,
     version = false,
@@ -118,7 +118,7 @@ require("lazy").setup({
 
       -- 修改构建命令使用新路径
       local build_cmd = string.format(
-        "cd /root/avante.nvim && make clean && make luajit BUILD_FROM_SOURCE=true"
+        "cd /root/.local/share/nvim/lazy/avante.nvim && make clean && make luajit BUILD_FROM_SOURCE=true"
       )
       print("Running build command: " .. build_cmd)
 
@@ -131,7 +131,7 @@ require("lazy").setup({
       end
 
       -- 验证构建结果使用新路径
-      local build_path = "/root/avante.nvim/build/avante_repo_map." .. ext
+      local build_path = "/root/.local/share/nvim/lazy/avante.nvim/build/avante_repo_map." .. ext
       if vim.fn.filereadable(build_path) ~= 1 then
         error("Build succeeded but library file not found: " .. build_path)
       end
