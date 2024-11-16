@@ -1721,16 +1721,6 @@ function Sidebar:render(opts)
     xpcall(function() api.nvim_buf_set_name(self.result.bufnr, RESULT_BUF_NAME) end, function(_) end)
   end)
 
-  self.result:map("n", "q", function()
-    Llm.cancel_inflight_request()
-    self:close()
-  end)
-
-  self.result:map("n", "<Esc>", function()
-    Llm.cancel_inflight_request()
-    self:close()
-  end)
-
   self:create_input(opts)
 
   self:update_content_with_history(chat_history)
