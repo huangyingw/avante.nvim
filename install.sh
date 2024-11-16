@@ -79,10 +79,7 @@ build_avante() {
 
     # 添加更详细的构建信息
     log_info "Running make with BUILD_FROM_SOURCE=true..."
-    if ! make BUILD_FROM_SOURCE=true; then
-        log_error "Build failed!"
-        return 1
-    fi
+    make BUILD_FROM_SOURCE=true VERBOSE=1  # 添加 VERBOSE=1 来显示详细的编译命令
 
     # 验证构建文件是否存在
     local os_name=$(uname -s)
@@ -94,12 +91,23 @@ build_avante() {
     fi
 
     local lib_path="$HOME/loadrc/avante.nvim/build/avante_repo_map.$ext"
-    if [ ! -f "$lib_path" ]; then
+
+    # 添加构建文件的详细信息
+    if [ -f "$lib_path" ]; then
+        log_info "Built library details:"
+        ls -l "$lib_path"
+        # 在 macOS/Linux 上显示依赖关系
+        if [ "$os_name" != "Windows_NT" ]; then
+            if command -v ldd >/dev/null 2>&1; then
+                ldd "$lib_path"
+            elif command -v otool >/dev/null 2>&1; then
+                otool -L "$lib_path"
+            fi
+        fi
+    else
         log_error "Built library not found at: $lib_path"
         return 1
     fi
-
-    log_info "Build completed successfully. Library created at: $lib_path"
 }
 
 # 主函数
