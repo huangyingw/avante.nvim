@@ -85,7 +85,23 @@ M.parse_messages = function(opts)
     messages[#messages].content = message_content
   end
 
-  return messages
+  local final_messages = {}
+  local prev_role = nil
+
+  vim.iter(messages):each(function(message)
+    local role = message.role
+    if role == prev_role then
+      if role == M.role_map["user"] then
+        table.insert(final_messages, { role = M.role_map["assistant"], content = "Ok, I understand." })
+      else
+        table.insert(final_messages, { role = M.role_map["user"], content = "Ok" })
+      end
+    end
+    prev_role = role
+    table.insert(final_messages, { role = M.role_map[role] or role, content = message.content })
+  end)
+
+  return final_messages
 end
 
 M.parse_response = function(data_stream, _, opts)
@@ -125,7 +141,8 @@ M.parse_curl_args = function(provider, code_opts)
   local headers = {
     ["Content-Type"] = "application/json",
   }
-  if not P.env.is_local("openai") then headers["Authorization"] = "Bearer " .. provider.parse_api_key() end
+
+  if P.env.require_api_key(base) then headers["Authorization"] = "Bearer " .. provider.parse_api_key() end
 
   -- NOTE: When using "o1" set the supported parameters only
   local stream = true
@@ -135,8 +152,11 @@ M.parse_curl_args = function(provider, code_opts)
     body_opts.temperature = 1
   end
 
+  Utils.debug("endpoint", base.endpoint)
+  Utils.debug("model", base.model)
+
   return {
-    url = Utils.trim(base.endpoint, { suffix = "/" }) .. "/chat/completions",
+    url = Utils.url_join(base.endpoint, "/chat/completions"),
     proxy = base.proxy,
     insecure = base.allow_insecure,
     headers = headers,
