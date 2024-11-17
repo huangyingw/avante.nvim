@@ -24,3 +24,4 @@
   ignore = ./.dockerignore
   ignore = ./docker/*
   ignore = ./README.md
+  ignore = ./lua/avante/logger.lua
