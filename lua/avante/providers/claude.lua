@@ -28,6 +28,26 @@ M.role_map = {
   assistant = "assistant",
 }
 
+-- 添加调试函数定义
+local function debug_request(url, headers, body)
+  if require("avante.config").debug then
+    print("\n=== Claude API Request ===")
+    print("URL:", url)
+    print("Headers:", vim.inspect(headers))
+    print("Body:", vim.inspect(body))
+    print("=====================\n")
+  end
+end
+
+local function debug_response(response)
+  if require("avante.config").debug then
+    print("\n=== Claude API Response ===")
+    print("Status:", response.status)
+    print("Body:", vim.inspect(response.body))
+    print("=====================\n")
+  end
+end
+
 M.parse_messages = function(opts)
   ---@type AvanteClaudeMessage[]
   local messages = {}
@@ -104,28 +124,37 @@ M.parse_curl_args = function(provider, prompt_opts)
   if not P.env.is_local("claude") then headers["x-api-key"] = provider.parse_api_key() end
 
   local messages = M.parse_messages(prompt_opts)
+  
+  local url = Utils.trim(base.endpoint, { suffix = "/" }) .. "/v1/messages"
+  local body = vim.tbl_deep_extend("force", {
+    model = base.model,
+    system = {
+      {
+        type = "text",
+        text = prompt_opts.system_prompt,
+        cache_control = { type = "ephemeral" },
+      },
+    },
+    messages = messages,
+    stream = true,
+  }, body_opts)
+
+  -- 添加调试输出
+  debug_request(url, headers, body)
 
   return {
-    url = Utils.trim(base.endpoint, { suffix = "/" }) .. "/v1/messages",
+    url = url,
     proxy = base.proxy,
     insecure = base.allow_insecure,
     headers = headers,
-    body = vim.tbl_deep_extend("force", {
-      model = base.model,
-      system = {
-        {
-          type = "text",
-          text = prompt_opts.system_prompt,
-          cache_control = { type = "ephemeral" },
-        },
-      },
-      messages = messages,
-      stream = true,
-    }, body_opts),
+    body = body,
   }
 end
 
 M.on_error = function(result)
+  -- 添加调试输出
+  debug_response(result)
+
   if not result.body then
     return Utils.error("API request failed with status " .. result.status, { once = true, title = "Avante" })
   end
