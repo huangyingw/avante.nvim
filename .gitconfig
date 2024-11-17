@@ -21,3 +21,6 @@
   ignore = ./Dockerfile
   ignore = ./docker-compose.yml
   ignore = ./install.sh
+  ignore = ./.dockerignore
+  ignore = ./docker/*
+  ignore = ./README.md
