@@ -1,6 +1,7 @@
 local Utils = require("avante.utils")
 local Clipboard = require("avante.clipboard")
 local P = require("avante.providers")
+local Logger = require("avante.logger")
 
 ---@class AvanteClaudeBaseMessage
 ---@field cache_control {type: "ephemeral"}?
@@ -27,39 +28,6 @@ M.role_map = {
   user = "user",
   assistant = "assistant",
 }
-
--- 添加日志文件路径定义
-local log_file = vim.fn.stdpath("cache") .. "/avante_claude.log"
-
--- 添加日志写入函数
-local function write_log(message)
-  local file = io.open(log_file, "a")
-  if file then
-    local timestamp = os.date("%Y-%m-%d %H:%M:%S")
-    file:write(string.format("[%s] %s\n", timestamp, message))
-    file:close()
-  end
-end
-
--- 修改调试函数
-local function debug_request(url, headers, body)
-  if require("avante.config").debug then
-    write_log("\n=== Claude API Request ===")
-    write_log("URL: " .. url)
-    write_log("Headers: " .. vim.inspect(headers))
-    write_log("Body: " .. vim.inspect(body))
-    write_log("=====================\n")
-  end
-end
-
-local function debug_response(response)
-  if require("avante.config").debug then
-    write_log("\n=== Claude API Response ===")
-    write_log("Status: " .. tostring(response.status))
-    write_log("Body: " .. vim.inspect(response.body))
-    write_log("=====================\n")
-  end
-end
 
 M.parse_messages = function(opts)
   ---@type AvanteClaudeMessage[]
@@ -153,8 +121,7 @@ M.parse_curl_args = function(provider, prompt_opts)
       stream = true,
   }, body_opts)
 
-  -- 添加调试输出
-  debug_request(url, headers, body)
+  Logger.debug_request(url, headers, body)
 
   return {
     url = url,
@@ -166,8 +133,7 @@ M.parse_curl_args = function(provider, prompt_opts)
 end
 
 M.on_error = function(result)
-  -- 添加调试输出
-  debug_response(result)
+  Logger.debug_response(result)
 
   if not result.body then
     return Utils.error("API request failed with status " .. result.status, { once = true, title = "Avante" })
