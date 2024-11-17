@@ -10,51 +10,85 @@ diff --git a/Makefile b/Makefile
  endef
  
  define build_targets
-diff --git a/README.md b/README.md
---- ./README.md
-+++ ./README.md
-@@ -481,3 +481,5 @@ The high quality and ingenuity of these projects' source code have been immensel
- ## License
+diff --git a/lua/avante/config.lua b/lua/avante/config.lua
+--- ./lua/avante/config.lua
++++ ./lua/avante/config.lua
+@@ -47,7 +47,7 @@ M.defaults = {
+   ---@type AvanteSupportedProvider
+   claude = {
+       endpoint = "https://api.anthropic.com",
+-    model = "claude-3-5-sonnet-20241022",
++      model = "claude-3-5-haiku-20241022",
+       timeout = 30000, -- Timeout in milliseconds
+       temperature = 0,
+       max_tokens = 8000,
+diff --git a/lua/avante/providers/claude.lua b/lua/avante/providers/claude.lua
+--- ./lua/avante/providers/claude.lua
++++ ./lua/avante/providers/claude.lua
+@@ -1,6 +1,7 @@
+ local Utils = require("avante.utils")
+ local Clipboard = require("avante.clipboard")
+ local P = require("avante.providers")
++local Logger = require("avante.logger")
  
- avante.nvim is licensed under the Apache 2.0 License. For more details, please refer to the [LICENSE](./LICENSE) file.
+ ---@class AvanteClaudeBaseMessage
+ ---@field cache_control {type: "ephemeral"}?
+@@ -106,12 +107,8 @@ M.parse_curl_args = function(provider, prompt_opts)
+ 
+   local messages = M.parse_messages(prompt_opts)
+ 
+-  return {
+-    url = Utils.url_join(base.endpoint, "/v1/messages"),
+-    proxy = base.proxy,
+-    insecure = base.allow_insecure,
+-    headers = headers,
+-    body = vim.tbl_deep_extend("force", {
++  local url = Utils.trim(base.endpoint, { suffix = "/" }) .. "/v1/messages"
++  local body = vim.tbl_deep_extend("force", {
+       model = base.model,
+       system = {
+         {
+@@ -122,11 +119,22 @@ M.parse_curl_args = function(provider, prompt_opts)
+       },
+       messages = messages,
+       stream = true,
+-    }, body_opts),
++  }, body_opts)
 +
-+帮我设计一个二分查找算法.
-diff --git a/lua/avante/prompt_input.lua b/lua/avante/prompt_input.lua
---- ./lua/avante/prompt_input.lua
-+++ ./lua/avante/prompt_input.lua
-@@ -145,9 +145,32 @@ function PromptInput:cancel()
-   if self.cancel_callback then self.cancel_callback() end
++  Logger.debug_request(url, headers, body)
++
++  return {
++    url = url,
++    proxy = base.proxy,
++    insecure = base.allow_insecure,
++    headers = headers,
++    body = body,
+   }
  end
  
--function PromptInput:submit(input)
--  if self.close_on_submit then self:close() end
--  if self.submit_callback then self.submit_callback(input) end
-+ -- 找到 submit 函数，大约在第 150 行
-+function PromptInput:submit()
-+  local lines = vim.api.nvim_buf_get_lines(self.bufnr, 0, -1, false)
-+  local input = table.concat(lines, "\n")
+ M.on_error = function(result)
++  Logger.debug_response(result)
 +
-+  -- 修改这里，确保数据格式正确
-+  local data = {
-+    question = input,
-+    mode = "asking"
-+  }
-+
-+  -- 记录日志
-+  vim.fn.writefile(
-+    {vim.fn.strftime("%Y-%m-%d %H:%M:%S") .. " Submit data: " .. vim.inspect(data)},
-+    vim.fn.stdpath("state") .. "/avante.log",
-+    "a"
-+  )
-+
-+  -- 触发事件
-+  vim.api.nvim_exec_autocmds("User", {
-+    pattern = "AvanteInputSubmitted",
-+    data = data
-+  })
-+
-+  -- 关闭输入缓冲区
-+  vim.api.nvim_buf_delete(self.bufnr, { force = true })
- end
+   if not result.body then
+     return Utils.error("API request failed with status " .. result.status, { once = true, title = "Avante" })
+   end
+diff --git a/lua/avante/sidebar.lua b/lua/avante/sidebar.lua
+--- ./lua/avante/sidebar.lua
++++ ./lua/avante/sidebar.lua
+@@ -1720,16 +1720,6 @@ function Sidebar:render(opts)
+     xpcall(function() api.nvim_buf_set_name(self.result.bufnr, RESULT_BUF_NAME) end, function(_) end)
+   end)
  
- function PromptInput:show_shortcuts_hints()
+-  self.result:map("n", "q", function()
+-    Llm.cancel_inflight_request()
+-    self:close()
+-  end)
+-
+-  self.result:map("n", "<Esc>", function()
+-    Llm.cancel_inflight_request()
+-    self:close()
+-  end)
+-
+   self:create_input(opts)
+ 
+   self:update_content_with_history(chat_history)
