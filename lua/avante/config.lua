@@ -48,13 +48,13 @@ M.defaults = {
   },
   ---@type AvanteSupportedProvider
   claude = {
-    endpoint = "https://api.anthropic.com",
-    model = "claude-3-5-sonnet-20241022",
-    timeout = 30000, -- Timeout in milliseconds
-    temperature = 0,
-    max_tokens = 8000,
-    ["local"] = false,
-  },
+      endpoint = "https://api.anthropic.com",
+      model = "claude-3-5-haiku-20241022",
+      timeout = 30000, -- Timeout in milliseconds
+      temperature = 0,
+      max_tokens = 8000,
+      ["local"] = false,
+    },
   ---@type AvanteSupportedProvider
   gemini = {
     endpoint = "https://generativelanguage.googleapis.com/v1beta/models",
