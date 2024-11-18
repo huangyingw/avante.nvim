@@ -155,7 +155,6 @@ M._stream = function(opts, Provider)
         return
       end
       if not data then return end
-
       vim.schedule(function()
         if Config.options[Config.provider] == nil and Provider.parse_stream_data ~= nil then
           if Provider.parse_response ~= nil then
@@ -209,40 +208,23 @@ M._stream = function(opts, Provider)
 
       active_job = nil
       cleanup()
-
       if result.status >= 400 then
-        local error_body = result.body
-        if type(result.body) == "string" then
-          local ok, decoded = pcall(vim.json.decode, result.body)
-          if ok then
-            error_body = decoded
-          end
-        end
-
-        Logger.debug_response({
-          event = "request_error",
-          status = result.status,
-          error = error_body,
-          raw_body = result.body
-        })
-
         if Provider.on_error then
           Provider.on_error(result)
         else
           Utils.error("API request failed with status " .. result.status, { once = true, title = "Avante" })
         end
-
         vim.schedule(function()
           if not completed then
             completed = true
-            opts.on_complete(string.format("API request failed with status %d. Error: %s",
-              result.status,
-              vim.inspect(error_body)
-            ))
+            opts.on_complete(
+              "API request failed with status " .. result.status .. ". Body: " .. vim.inspect(result.body)
+            )
           end
         end)
       end
 
+      -- If stream is not enabled, then handle the response here
       if spec.body.stream == false and result.status == 200 then
         vim.schedule(function()
           completed = true
