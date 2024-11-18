@@ -1,7 +1,6 @@
 local Utils = require("avante.utils")
 local Clipboard = require("avante.clipboard")
 local P = require("avante.providers")
-local Logger = require("avante.logger")
 
 ---@class AvanteClaudeBaseMessage
 ---@field cache_control {type: "ephemeral"}?
@@ -129,8 +128,6 @@ M.parse_curl_args = function(provider, prompt_opts)
       stream = true,
   }, body_opts)
 
-  Logger.debug_request(url, headers, body)
-
   return {
     url = url,
     proxy = base.proxy,
@@ -141,8 +138,6 @@ M.parse_curl_args = function(provider, prompt_opts)
 end
 
 M.on_error = function(result)
-  Logger.debug_response(result)
-
   if not result.body then
     return Utils.error("API request failed with status " .. result.status, { once = true, title = "Avante" })
   end
@@ -162,28 +157,6 @@ M.on_error = function(result)
   end
 
   Utils.error(error_msg, { once = true, title = "Avante" })
-end
-
-M.parse_stream_data = function(data, opts)
-  Logger.debug_response({ event = "stream_data_received", data = data })
-  local lines = vim.split(data, "\n")
-  for _, line in ipairs(lines) do
-    if line ~= "" then
-      local event = line:match("^event: (.+)$")
-      if event then
-        Logger.debug_response({ event = "event_line", event_type = event })
-        M.parse_response(event, event, opts)
-      else
-        local data_match = line:match("^data: (.+)$")
-        if data_match then
-          Logger.debug_response({ event = "data_line", data = data_match })
-          M.parse_response(data_match, "content_block_delta", opts)
-        else
-          Logger.debug_response({ event = "unmatched_line", line = line })
-        end
-      end
-    end
-  end
 end
 
 return M
