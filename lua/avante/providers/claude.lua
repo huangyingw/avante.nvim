@@ -81,20 +81,12 @@ M.parse_response = function(data_stream, event_state, opts)
   if event_state == "content_block_delta" then
     local ok, json = pcall(vim.json.decode, data_stream)
     if not ok then return end
-
-    if json and json.delta and json.delta.text then
       opts.on_chunk(json.delta.text)
-    end
   elseif event_state == "message_stop" then
     opts.on_complete(nil)
     return
   elseif event_state == "error" then
-    local ok, json = pcall(vim.json.decode, data_stream)
-    if ok then
-      opts.on_complete(json)
-    else
-      opts.on_complete(data_stream)
-    end
+    opts.on_complete(vim.json.decode(data_stream))
   end
 end
 
