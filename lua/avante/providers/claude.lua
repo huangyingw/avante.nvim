@@ -79,15 +79,44 @@ M.parse_messages = function(opts)
 end
 
 M.parse_response = function(data_stream, event_state, opts)
+  Logger.debug_response({ event = "parse_response_start", state = event_state, data = data_stream })
+  
   if event_state == "content_block_delta" then
     local ok, json = pcall(vim.json.decode, data_stream)
-    if not ok then return end
-    opts.on_chunk(json.delta.text)
+    Logger.debug_response({ event = "json_decode_result", success = ok, data = json })
+    
+    if not ok then 
+      Logger.debug_response({ event = "json_decode_failed", error = json })
+      return 
+    end
+    
+    -- 安全地检查 JSON 结构
+    if json and json.delta and json.delta.text then
+      opts.on_chunk(json.delta.text)
+    else
+      Logger.debug_response({ 
+        event = "unexpected_json_structure", 
+        json = json,
+        message = "Expected json.delta.text structure not found"
+      })
+    end
   elseif event_state == "message_stop" then
+    Logger.debug_response({ event = "message_stop_received" })
     opts.on_complete(nil)
     return
   elseif event_state == "error" then
-    opts.on_complete(vim.json.decode(data_stream))
+    local ok, json = pcall(vim.json.decode, data_stream)
+    Logger.debug_response({ 
+      event = "error_received", 
+      success = ok, 
+      data = json,
+      raw_data = data_stream 
+    })
+    if ok then
+      opts.on_complete(json)
+    else
+      opts.on_complete(data_stream)
+    end
   end
 end
 
@@ -154,6 +183,28 @@ M.on_error = function(result)
   end
 
   Utils.error(error_msg, { once = true, title = "Avante" })
+end
+
+M.parse_stream_data = function(data, opts)
+  Logger.debug_response({ event = "stream_data_received", data = data })
+  local lines = vim.split(data, "\n")
+  for _, line in ipairs(lines) do
+    if line ~= "" then
+      local event = line:match("^event: (.+)$")
+      if event then
+        Logger.debug_response({ event = "event_line", event_type = event })
+        M.parse_response(event, event, opts)
+      else
+        local data_match = line:match("^data: (.+)$")
+        if data_match then
+          Logger.debug_response({ event = "data_line", data = data_match })
+          M.parse_response(data_match, "content_block_delta", opts)
+        else
+          Logger.debug_response({ event = "unmatched_line", line = line })
+        end
+      end
+    end
+  end
 end
 
 return M
