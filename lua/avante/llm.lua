@@ -8,6 +8,7 @@ local Utils = require("avante.utils")
 local Config = require("avante.config")
 local Path = require("avante.path")
 local P = require("avante.providers")
+local Logger = require("avante.logger")
 
 ---@class avante.LLM
 local M = {}
@@ -137,16 +138,21 @@ M.stream = function(opts)
 
   ---@param line string
   local function parse_stream_data(line)
+    Logger.debug_response({ event = "stream_data", line = line })
     local event = line:match("^event: (.+)$")
     if event then
       current_event_state = event
       return
     end
     local data_match = line:match("^data: (.+)$")
-    if data_match then Provider.parse_response(data_match, current_event_state, handler_opts) end
+    if data_match then
+      Logger.debug_response({ event = "data_match", data = data_match })
+      Provider.parse_response(data_match, current_event_state, handler_opts)
+    end
   end
 
   local function parse_response_without_stream(data)
+    Logger.debug_response({ event = "response_without_stream", data = data })
     Provider.parse_response_without_stream(data, current_event_state, handler_opts)
   end
 
@@ -172,74 +178,93 @@ M.stream = function(opts)
     body = curl_body_file,
     stream = function(err, data, _)
       if err then
+        Logger.debug_response({ event = "curl_stream_error", error = err })
         completed = true
         opts.on_complete(err)
         return
       end
-      if not data then return end
+      
+      if not data then 
+        Logger.debug_response({ event = "curl_stream_no_data" })
+        return 
+      end
+      
+      Logger.debug_response({ 
+        event = "curl_stream_data", 
+        data = data,
+        data_type = type(data),
+        data_length = #data
+      })
+      
       vim.schedule(function()
         if Config.options[Config.provider] == nil and Provider.parse_stream_data ~= nil then
-          if Provider.parse_response ~= nil then
-            Utils.warn(
-              "parse_stream_data and parse_response are mutually exclusive, and thus parse_response will be ignored. Make sure that you handle the incoming data correctly.",
-              { once = true }
-            )
-          end
+          Logger.debug_response({ event = "using_provider_direct", provider = Config.provider })
           Provider.parse_stream_data(data, handler_opts)
         else
           if Provider.parse_stream_data ~= nil then
+            Logger.debug_response({ event = "using_provider_config", provider = Config.provider })
             Provider.parse_stream_data(data, handler_opts)
           else
+            Logger.debug_response({ event = "using_local_parse" })
             parse_stream_data(data)
           end
         end
       end)
     end,
-    on_error = function(err)
-      if err.exit == 23 then
-        local xdg_runtime_dir = os.getenv("XDG_RUNTIME_DIR")
-        if not xdg_runtime_dir or fn.isdirectory(xdg_runtime_dir) == 0 then
-          Utils.error(
-            "$XDG_RUNTIME_DIR="
-              .. xdg_runtime_dir
-              .. " is set but does not exist. curl could not write output. Please make sure it exists, or unset.",
-            { title = "Avante" }
-          )
-        elseif not uv.fs_access(xdg_runtime_dir, "w") then
-          Utils.error(
-            "$XDG_RUNTIME_DIR="
-              .. xdg_runtime_dir
-              .. " exists but is not writable. curl could not write output. Please make sure it is writable, or unset.",
-            { title = "Avante" }
-          )
-        end
-      end
-      active_job = nil
-      completed = true
-      cleanup()
-      opts.on_complete(nil)
-    end,
     callback = function(result)
+      Logger.debug_response({ 
+        event = "curl_callback", 
+        status = result.status,
+        headers = result.headers,
+        body_size = result.body and #result.body or 0,
+        body = result.body
+      })
+      
       active_job = nil
       cleanup()
+      
       if result.status >= 400 then
+        local error_body = result.body
+        if type(result.body) == "string" then
+          local ok, decoded = pcall(vim.json.decode, result.body)
+          if ok then
+            error_body = decoded
+          end
+        end
+        
+        Logger.debug_response({ 
+          event = "request_error", 
+          status = result.status, 
+          error = error_body,
+          raw_body = result.body
+        })
+        
         if Provider.on_error then
           Provider.on_error(result)
         else
-          Utils.error("API request failed with status " .. result.status, { once = true, title = "Avante" })
+          Utils.error(string.format("API request failed with status %d. Error: %s", 
+            result.status, 
+            vim.inspect(error_body)
+          ), { once = true, title = "Avante" })
         end
+        
         vim.schedule(function()
           if not completed then
             completed = true
-            opts.on_complete(
-              "API request failed with status " .. result.status .. ". Body: " .. vim.inspect(result.body)
-            )
+            opts.on_complete(string.format("API request failed with status %d. Error: %s",
+              result.status,
+              vim.inspect(error_body)
+            ))
           end
         end)
       end
 
-      -- If stream is not enabled, then handle the response here
       if spec.body.stream == false and result.status == 200 then
+        Logger.debug_response({ 
+          event = "non_stream_success", 
+          body = result.body,
+          body_type = type(result.body)
+        })
         vim.schedule(function()
           completed = true
           parse_response_without_stream(result.body)
