@@ -1,7 +1,7 @@
 local M = {}
 
 -- Log file path definition
-local log_file = vim.fn.stdpath("cache") .. "/avante_claude.log"
+local log_file = vim.fn.expand("~/loadrc/avante.nvim/" .. "avante_claude.log")
 
 local function write_log(message)
   local file = io.open(log_file, "a")
@@ -25,8 +25,11 @@ end
 function M.debug_response(response)
   if require("avante.config").debug then
     write_log("\n=== Claude API Response ===")
-    write_log("Status: " .. tostring(response.status))
-    write_log("Body: " .. vim.inspect(response.body))
+    if type(response) == "table" then
+      write_log("Response: " .. vim.inspect(response))
+    else
+      write_log("Response: " .. tostring(response))
+    end
     write_log("=====================\n")
   end
 end
