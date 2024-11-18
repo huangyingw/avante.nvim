@@ -81,7 +81,7 @@ M.parse_response = function(data_stream, event_state, opts)
   if event_state == "content_block_delta" then
     local ok, json = pcall(vim.json.decode, data_stream)
     if not ok then return end
-    
+
     if json and json.delta and json.delta.text then
       opts.on_chunk(json.delta.text)
     end
@@ -114,8 +114,12 @@ M.parse_curl_args = function(provider, prompt_opts)
 
   local messages = M.parse_messages(prompt_opts)
 
-  local url = Utils.trim(base.endpoint, { suffix = "/" }) .. "/v1/messages"
-  local body = vim.tbl_deep_extend("force", {
+  return {
+    url = Utils.url_join(base.endpoint, "/v1/messages"),
+    proxy = base.proxy,
+    insecure = base.allow_insecure,
+    headers = headers,
+    body = vim.tbl_deep_extend("force", {
       model = base.model,
       system = {
         {
@@ -126,14 +130,7 @@ M.parse_curl_args = function(provider, prompt_opts)
       },
       messages = messages,
       stream = true,
-  }, body_opts)
-
-  return {
-    url = url,
-    proxy = base.proxy,
-    insecure = base.allow_insecure,
-    headers = headers,
-    body = body,
+    }, body_opts),
   }
 end
 
