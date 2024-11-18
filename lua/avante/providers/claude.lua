@@ -79,39 +79,18 @@ M.parse_messages = function(opts)
 end
 
 M.parse_response = function(data_stream, event_state, opts)
-  Logger.debug_response({ event = "parse_response_start", state = event_state, data = data_stream })
-  
   if event_state == "content_block_delta" then
     local ok, json = pcall(vim.json.decode, data_stream)
-    Logger.debug_response({ event = "json_decode_result", success = ok, data = json })
+    if not ok then return end
     
-    if not ok then 
-      Logger.debug_response({ event = "json_decode_failed", error = json })
-      return 
-    end
-    
-    -- 安全地检查 JSON 结构
     if json and json.delta and json.delta.text then
       opts.on_chunk(json.delta.text)
-    else
-      Logger.debug_response({ 
-        event = "unexpected_json_structure", 
-        json = json,
-        message = "Expected json.delta.text structure not found"
-      })
     end
   elseif event_state == "message_stop" then
-    Logger.debug_response({ event = "message_stop_received" })
     opts.on_complete(nil)
     return
   elseif event_state == "error" then
     local ok, json = pcall(vim.json.decode, data_stream)
-    Logger.debug_response({ 
-      event = "error_received", 
-      success = ok, 
-      data = json,
-      raw_data = data_stream 
-    })
     if ok then
       opts.on_complete(json)
     else
