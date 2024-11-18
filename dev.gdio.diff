@@ -1,15 +1,3 @@
-diff --git a/Makefile b/Makefile
---- ./Makefile
-+++ ./Makefile
-@@ -44,6 +44,8 @@ define build_package
- $1-$2:
- 	cargo build --release --features=$1 -p avante-$2
- 	cp target/release/libavante_$(shell echo $2 | tr - _).$(EXT) $(BUILD_DIR)/avante_$(shell echo $2 | tr - _).$(EXT)
-+	@mkdir -p lua/avante
-+	cp $(BUILD_DIR)/avante_$(shell echo $2 | tr - _).$(EXT) lua/avante/
- endef
- 
- define build_targets
 diff --git a/lua/avante/config.lua b/lua/avante/config.lua
 --- ./lua/avante/config.lua
 +++ ./lua/avante/config.lua
@@ -72,3 +60,23 @@ diff --git a/lua/avante/sidebar.lua b/lua/avante/sidebar.lua
    self:create_input(opts)
  
    self:update_content_with_history(chat_history)
+diff --git a/neovim/init.lua b/neovim/init.lua
+new file mode 100644
+--- /dev/null
++++ ./neovim/init.lua
+@@ -0,0 +1,15 @@
++-- init.lua
++vim.cmd 'set runtimepath^=~/.vim runtimepath+=~/.vim/after'
++vim.cmd 'let &packpath = &runtimepath'
++
++-- 禁用终端的 GUI 颜色支持
++vim.o.termguicolors = false
++
++-- 设置当前的颜色方案为 'vim'
++vim.cmd('colorscheme vim')
++
++vim.cmd 'source ~/.vimrc'
++
++require('plugins')
++require('keymaps')
++require('nvim_molten_config')
