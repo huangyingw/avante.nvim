@@ -8,6 +8,9 @@ vim.o.termguicolors = false
 -- 设置当前的颜色方案为 'vim'
 vim.cmd('colorscheme vim')
 
+vim.cmd 'source ~/.vim/plugin/common.vim'
+vim.cmd 'source ~/.vimrc'
+
 -- 设置库路径
 local function setup_lib_path()
   local os_name = vim.loop.os_uname().sysname:lower()
