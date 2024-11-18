@@ -115,21 +115,16 @@ M._stream = function(opts, Provider)
 
   ---@param line string
   local function parse_stream_data(line)
-    Logger.debug_response({ event = "stream_data", line = line })
     local event = line:match("^event: (.+)$")
     if event then
       current_event_state = event
       return
     end
     local data_match = line:match("^data: (.+)$")
-    if data_match then
-      Logger.debug_response({ event = "data_match", data = data_match })
-      Provider.parse_response(data_match, current_event_state, handler_opts)
-    end
+    if data_match then Provider.parse_response(data_match, current_event_state, handler_opts) end
   end
 
   local function parse_response_without_stream(data)
-    Logger.debug_response({ event = "response_without_stream", data = data })
     Provider.parse_response_without_stream(data, current_event_state, handler_opts)
   end
 
@@ -155,34 +150,19 @@ M._stream = function(opts, Provider)
     body = curl_body_file,
     stream = function(err, data, _)
       if err then
-        Logger.debug_response({ event = "curl_stream_error", error = err })
         completed = true
         opts.on_complete(err)
         return
       end
-      
-      if not data then 
-        Logger.debug_response({ event = "curl_stream_no_data" })
-        return 
-      end
-      
-      Logger.debug_response({ 
-        event = "curl_stream_data", 
-        data = data,
-        data_type = type(data),
-        data_length = #data
-      })
+      if not data then return end
       
       vim.schedule(function()
         if Config.options[Config.provider] == nil and Provider.parse_stream_data ~= nil then
-          Logger.debug_response({ event = "using_provider_direct", provider = Config.provider })
           Provider.parse_stream_data(data, handler_opts)
         else
           if Provider.parse_stream_data ~= nil then
-            Logger.debug_response({ event = "using_provider_config", provider = Config.provider })
             Provider.parse_stream_data(data, handler_opts)
           else
-            Logger.debug_response({ event = "using_local_parse" })
             parse_stream_data(data)
           end
         end
@@ -237,11 +217,6 @@ M._stream = function(opts, Provider)
       end
 
       if spec.body.stream == false and result.status == 200 then
-        Logger.debug_response({ 
-          event = "non_stream_success", 
-          body = result.body,
-          body_type = type(result.body)
-        })
         vim.schedule(function()
           completed = true
           parse_response_without_stream(result.body)
