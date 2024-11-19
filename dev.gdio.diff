@@ -1,6 +1,15 @@
 diff --git a/lua/avante/config.lua b/lua/avante/config.lua
 --- ./lua/avante/config.lua
 +++ ./lua/avante/config.lua
+@@ -28,7 +28,7 @@ M.defaults = {
+   ---@type AvanteSupportedProvider
+   copilot = {
+     endpoint = "https://api.githubcopilot.com",
+-    model = "gpt-4o-2024-08-06",
++    model = "gpt-4o-2024-05-13",
+     proxy = nil, -- [protocol://]host[:port] Use this proxy
+     allow_insecure = false, -- Allow insecure server connections
+     timeout = 30000, -- Timeout in milliseconds
 @@ -47,10 +47,10 @@ M.defaults = {
    ---@type AvanteSupportedProvider
    claude = {
@@ -40,10 +49,198 @@ diff --git a/lua/avante/llm.lua b/lua/avante/llm.lua
        active_job = nil
        cleanup()
        if result.status >= 400 then
+diff --git a/lua/avante/providers/claude.lua b/lua/avante/providers/claude.lua
+--- ./lua/avante/providers/claude.lua
++++ ./lua/avante/providers/claude.lua
+@@ -1,6 +1,7 @@
+ local Utils = require("avante.utils")
+ local Clipboard = require("avante.clipboard")
+ local P = require("avante.providers")
++local Logger = require("avante.logger")
+ 
+ ---@class AvanteClaudeBaseMessage
+ ---@field cache_control {type: "ephemeral"}?
+@@ -78,13 +79,6 @@ M.parse_messages = function(opts)
+ end
+ 
+ M.parse_response = function(data_stream, event_state, opts)
+-  if event_state == nil then
+-    if data_stream:match('"content_block_delta"') then
+-      event_state = "content_block_delta"
+-    elseif data_stream:match('"message_stop"') then
+-      event_state = "message_stop"
+-    end
+-  end
+   if event_state == "content_block_delta" then
+     local ok, json = pcall(vim.json.decode, data_stream)
+     if not ok then return end
+@@ -113,12 +107,8 @@ M.parse_curl_args = function(provider, prompt_opts)
+ 
+   local messages = M.parse_messages(prompt_opts)
+ 
+-  return {
+-    url = Utils.url_join(base.endpoint, "/v1/messages"),
+-    proxy = base.proxy,
+-    insecure = base.allow_insecure,
+-    headers = headers,
+-    body = vim.tbl_deep_extend("force", {
++  local url = Utils.trim(base.endpoint, { suffix = "/" }) .. "/v1/messages"
++  local body = vim.tbl_deep_extend("force", {
+       model = base.model,
+       system = {
+         {
+@@ -129,7 +119,16 @@ M.parse_curl_args = function(provider, prompt_opts)
+       },
+       messages = messages,
+       stream = true,
+-    }, body_opts),
++   }, body_opts)
++
++  Logger.debug_request(url, headers, body)
++
++  return {
++    url = url,
++    proxy = base.proxy,
++    insecure = base.allow_insecure,
++    headers = headers,
++    body = body,
+   }
+ end
+ 
+diff --git a/lua/avante/providers/copilot.lua b/lua/avante/providers/copilot.lua
+--- ./lua/avante/providers/copilot.lua
++++ ./lua/avante/providers/copilot.lua
+@@ -79,7 +79,7 @@ H.get_oauth_token = function()
+ end
+ 
+ H.chat_auth_url = "https://api.github.com/copilot_internal/v2/token"
+-H.chat_completion_url = function(base_url) return Utils.url_join(base_url, "/chat/completions") end
++H.chat_completion_url = function(base_url) return Utils.trim(base_url, { prefix = "/" }) .. "/chat/completions" end
+ 
+ ---@class AvanteProviderFunctor
+ local M = {}
+diff --git a/lua/avante/providers/init.lua b/lua/avante/providers/init.lua
+--- ./lua/avante/providers/init.lua
++++ ./lua/avante/providers/init.lua
+@@ -161,8 +161,6 @@ end
+ ---@param opts {refresh: boolean, provider: AvanteProviderFunctor}
+ ---@private
+ E.setup = function(opts)
+-  opts.provider.setup()
+-
+   local var = opts.provider.api_key_name
+ 
+   if var == nil or var == "" then
+@@ -170,6 +168,8 @@ E.setup = function(opts)
+     return
+   end
+ 
++  opts.provider.setup()
++
+   -- check if var is a all caps string
+   if type(var) == "table" or var:match("^cmd:(.*)") then return end
+ 
 diff --git a/lua/avante/sidebar.lua b/lua/avante/sidebar.lua
 --- ./lua/avante/sidebar.lua
 +++ ./lua/avante/sidebar.lua
-@@ -1730,16 +1730,6 @@ function Sidebar:render(opts)
+@@ -1099,7 +1099,7 @@ local function get_timestamp() return os.date("%Y-%m-%d %H:%M:%S") end
+ ---@param provider string
+ ---@param model string
+ ---@param request string
+----@param selected_file {filepath: string}?
++---@param selected_file {filepath: string, content: string}?
+ ---@param selected_code {filetype: string, content: string}?
+ ---@return string
+ local function render_chat_record_prefix(timestamp, provider, model, request, selected_file, selected_code)
+@@ -1207,10 +1207,10 @@ function Sidebar:get_content_between_separators()
+   return content, start_line
+ end
+ 
+----@alias AvanteSlashCommandType "clear" | "help" | "lines" | "reset"
+----@alias AvanteSlashCommandCallback fun(args: string, cb?: fun(args: string): nil): nil
+----@alias AvanteSlashCommand {description: string, command: AvanteSlashCommandType, details: string, shorthelp?: string, callback?: AvanteSlashCommandCallback}
+----@return AvanteSlashCommand[]
++---@alias AvanteSlashCommands "clear" | "help" | "lines" | "reset"
++---@alias AvanteSlashCallback fun(args: string, cb?: fun(args: string): nil): nil
++---@alias AvanteSlash {description: string, command: AvanteSlashCommands, details: string, shorthelp?: string, callback?: AvanteSlashCallback}
++---@return AvanteSlash[]
+ function Sidebar:get_commands()
+   ---@param items_ {command: string, description: string, shorthelp?: string}[]
+   ---@return string
+@@ -1222,7 +1222,7 @@ function Sidebar:get_commands()
+     return help_text
+   end
+ 
+-  ---@type AvanteSlashCommand[]
++  ---@type AvanteSlash[]
+   local items = {
+     { description = "Show help message", command = "help" },
+     { description = "Clear chat history", command = "clear" },
+@@ -1234,7 +1234,7 @@ function Sidebar:get_commands()
+     },
+   }
+ 
+-  ---@type {[AvanteSlashCommandType]: AvanteSlashCommandCallback}
++  ---@type {[AvanteSlashCommands]: AvanteSlashCallback}
+   local cbs = {
+     help = function(args, cb)
+       local help_text = get_help_text(items)
+@@ -1282,7 +1282,7 @@ function Sidebar:get_commands()
+   return vim
+     .iter(items)
+     :map(
+-      ---@param item AvanteSlashCommand
++      ---@param item AvanteSlash
+       function(item)
+         return {
+           command = item.command,
+@@ -1377,7 +1377,7 @@ function Sidebar:create_input(opts)
+         return
+       end
+       local cmds = self:get_commands()
+-      ---@type AvanteSlashCommand
++      ---@type AvanteSlash
+       local cmd = vim.iter(cmds):filter(function(_) return _.command == command end):totable()[1]
+       if cmd then
+         if command == "lines" then
+@@ -1594,10 +1594,7 @@ function Sidebar:create_input(opts)
+     callback = function()
+       local has_cmp, cmp = pcall(require, "cmp")
+       if has_cmp then
+-        cmp.register_source(
+-          "avante_commands",
+-          require("cmp_avante.commands").new(self:get_commands(), self.input.bufnr)
+-        )
++        cmp.register_source("avante_commands", require("cmp_avante.commands").new(self))
+         cmp.register_source(
+           "avante_mentions",
+           require("cmp_avante.mentions").new(Utils.get_mentions(), self.input.bufnr)
+@@ -1613,6 +1610,24 @@ function Sidebar:create_input(opts)
+     end,
+   })
+ 
++  -- Unregister completion
++  api.nvim_create_autocmd("BufLeave", {
++    group = self.augroup,
++    buffer = self.input.bufnr,
++    once = false,
++    desc = "Unregister the completion of helpers in the input buffer",
++    callback = function()
++      local has_cmp, cmp = pcall(require, "cmp")
++      if has_cmp then
++        for _, source in ipairs(cmp.core:get_sources()) do
++          if source.name == "avante_commands" or source.name == "avante_mentions" then
++            cmp.unregister_source(source.id)
++          end
++        end
++      end
++    end,
++  })
++
+   -- Close the floating window
+   local function close_hint()
+     if hint_window and api.nvim_win_is_valid(hint_window) then
+@@ -1780,16 +1795,6 @@ function Sidebar:render(opts)
      xpcall(function() api.nvim_buf_set_name(self.result.bufnr, RESULT_BUF_NAME) end, function(_) end)
    end)
  
@@ -60,6 +257,65 @@ diff --git a/lua/avante/sidebar.lua b/lua/avante/sidebar.lua
    self:create_input(opts)
  
    self:update_content_with_history(chat_history)
+diff --git a/lua/cmp_avante/commands.lua b/lua/cmp_avante/commands.lua
+--- ./lua/cmp_avante/commands.lua
++++ ./lua/cmp_avante/commands.lua
+@@ -1,21 +1,16 @@
+-local api = vim.api
+-
+ ---@class commands_source
+----@field commands AvanteSlashCommand[]
+----@field bufnr integer
++---@field sidebar avante.Sidebar
+ local commands_source = {}
+ 
+----@param commands AvanteSlashCommand[]
+----@param bufnr integer
+-function commands_source.new(commands, bufnr)
++---@param sidebar avante.Sidebar
++function commands_source.new(sidebar)
+   ---@type cmp.Source
+   return setmetatable({
+-    commands = commands,
+-    bufnr = bufnr,
++    sidebar = sidebar,
+   }, { __index = commands_source })
+ end
+ 
+-function commands_source:is_available() return api.nvim_get_current_buf() == self.bufnr end
++function commands_source:is_available() return vim.bo.filetype == "AvanteInput" end
+ 
+ commands_source.get_position_encoding_kind = function() return "utf-8" end
+ 
+@@ -28,7 +23,9 @@ function commands_source:complete(_, callback)
+ 
+   local items = {}
+ 
+-  for _, command in ipairs(self.commands) do
++  local commands = self.sidebar:get_commands()
++
++  for _, command in ipairs(commands) do
+     table.insert(items, {
+       label = "/" .. command.command,
+       kind = kind,
+diff --git a/lua/cmp_avante/mentions.lua b/lua/cmp_avante/mentions.lua
+--- ./lua/cmp_avante/mentions.lua
++++ ./lua/cmp_avante/mentions.lua
+@@ -1,5 +1,3 @@
+-local api = vim.api
+-
+ ---@class mentions_source
+ ---@field mentions {description: string, command: AvanteMentions, details: string, shorthelp?: string, callback?: AvanteMentionCallback}[]
+ ---@field bufnr integer
+@@ -15,7 +13,7 @@ function mentions_source.new(mentions, bufnr)
+   }, { __index = mentions_source })
+ end
+ 
+-function mentions_source:is_available() return api.nvim_get_current_buf() == self.bufnr end
++function mentions_source:is_available() return vim.api.nvim_get_current_buf() == self.bufnr end
+ 
+ mentions_source.get_position_encoding_kind = function() return "utf-8" end
+ 
 diff --git a/neovim/init.lua b/neovim/init.lua
 new file mode 100644
 --- /dev/null
