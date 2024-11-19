@@ -1,6 +1,7 @@
 local Utils = require("avante.utils")
 local Clipboard = require("avante.clipboard")
 local P = require("avante.providers")
+local Logger = require("avante.logger")
 
 ---@class AvanteClaudeBaseMessage
 ---@field cache_control {type: "ephemeral"}?
@@ -106,12 +107,8 @@ M.parse_curl_args = function(provider, prompt_opts)
 
   local messages = M.parse_messages(prompt_opts)
 
-  return {
-    url = Utils.url_join(base.endpoint, "/v1/messages"),
-    proxy = base.proxy,
-    insecure = base.allow_insecure,
-    headers = headers,
-    body = vim.tbl_deep_extend("force", {
+  local url = Utils.trim(base.endpoint, { suffix = "/" }) .. "/v1/messages"
+  local body = vim.tbl_deep_extend("force", {
       model = base.model,
       system = {
         {
@@ -122,7 +119,16 @@ M.parse_curl_args = function(provider, prompt_opts)
       },
       messages = messages,
       stream = true,
-    }, body_opts),
+   }, body_opts)
+
+  Logger.debug_request(url, headers, body)
+
+  return {
+    url = url,
+    proxy = base.proxy,
+    insecure = base.allow_insecure,
+    headers = headers,
+    body = body,
   }
 end
 
