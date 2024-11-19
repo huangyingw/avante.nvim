@@ -156,6 +156,17 @@ require("lazy").setup({
       })
     end
   }
+}, {
+  performance = {
+    rtp = {
+      reset = false,
+      paths = {
+        vim.fn.stdpath("data") .. "/lazy",
+        vim.fn.expand("~/.vim"),
+        vim.fn.expand("~/loadrc/avante.nvim")
+      }
+    }
+  }
 })
 
 -- 设置推荐的 Neovim 选项
@@ -221,7 +232,7 @@ vim.api.nvim_create_autocmd("FileType", {
   end
 })
 
--- ��� AvanteInput 和 AvanteOutput 缓冲区启用复制功能
+-- 设置 AvanteInput 和 AvanteOutput 缓冲区启用复制功能
 vim.api.nvim_create_autocmd("FileType", {
   pattern = {"AvanteInput", "AvanteOutput"},
   callback = function()
