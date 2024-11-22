@@ -161,4 +161,9 @@ M.on_error = function(result)
   Utils.error(error_msg, { once = true, title = "Avante" })
 end
 
+M.support_paste_image = function()
+  local supported = Config.support_paste_image()
+  return supported
+end
+
 return M
