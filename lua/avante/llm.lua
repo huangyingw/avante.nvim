@@ -29,17 +29,20 @@ M._stream = function(opts, Provider)
   -- Check if the instructions contains an image path
   local image_paths = {}
   local instructions = opts.instructions
-  if opts.instructions:match("image: ") then
-    local lines = vim.split(opts.instructions, "\n")
-    for i, line in ipairs(lines) do
-      if line:match("^image: ") then
-        local image_path = line:gsub("^image: ", "")
-        table.insert(image_paths, image_path)
-        table.remove(lines, i)
-      end
+
+  local lines = vim.split(opts.instructions, "\n")
+  for i, line in ipairs(lines) do
+    -- Check for both formats: with and without "image: " prefix
+    if line:match("^image: ") then
+      local image_path = line:gsub("^image: ", "")
+      table.insert(image_paths, image_path)
+      table.remove(lines, i)
+    elseif line:match("%.png$") or line:match("%.jpg$") or line:match("%.jpeg$") then
+      table.insert(image_paths, line)
+      table.remove(lines, i)
     end
-    instructions = table.concat(lines, "\n")
   end
+  instructions = table.concat(lines, "\n")
 
   Path.prompts.initialize(Path.prompts.get(opts.bufnr))
 
@@ -179,15 +182,15 @@ M._stream = function(opts, Provider)
         if not xdg_runtime_dir or fn.isdirectory(xdg_runtime_dir) == 0 then
           Utils.error(
             "$XDG_RUNTIME_DIR="
-              .. xdg_runtime_dir
-              .. " is set but does not exist. curl could not write output. Please make sure it exists, or unset.",
+            .. xdg_runtime_dir
+            .. " is set but does not exist. curl could not write output. Please make sure it exists, or unset.",
             { title = "Avante" }
           )
         elseif not uv.fs_access(xdg_runtime_dir, "w") then
           Utils.error(
             "$XDG_RUNTIME_DIR="
-              .. xdg_runtime_dir
-              .. " exists but is not writable. curl could not write output. Please make sure it is writable, or unset.",
+            .. xdg_runtime_dir
+            .. " exists but is not writable. curl could not write output. Please make sure it is writable, or unset.",
             { title = "Avante" }
           )
         end
@@ -254,8 +257,8 @@ end
 local function _merge_response(first_response, second_response, opts, Provider)
   local prompt = "\n" .. Config.dual_boost.prompt
   prompt = prompt
-    :gsub("{{[%s]*provider1_output[%s]*}}", first_response)
-    :gsub("{{[%s]*provider2_output[%s]*}}", second_response)
+  :gsub("{{[%s]*provider1_output[%s]*}}", first_response)
+  :gsub("{{[%s]*provider2_output[%s]*}}", second_response)
 
   prompt = prompt .. "\n"
 
