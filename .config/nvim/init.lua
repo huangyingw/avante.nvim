@@ -8,7 +8,6 @@ vim.o.termguicolors = false
 -- 设置当前的颜色方案为 'vim'
 vim.cmd('colorscheme vim')
 
-vim.cmd 'source ~/.vim/plugin/common.vim'
 vim.cmd 'source ~/.vimrc'
 
 -- 设置库路径
@@ -105,6 +104,18 @@ require("lazy").setup({
               insert_mode = true,
             },
             use_absolute_path = true,
+            save_format = "png",
+            show_notification = true,
+            is_verbose = true,
+            debug = true,
+            paste_command = function()
+              if vim.fn.has('mac') == 1 then
+                return { 'pngpaste', '-' }
+              elseif vim.fn.has('unix') == 1 then
+                return { 'xclip', '-selection', 'clipboard', '-t', 'image/png', '-o' }
+              end
+              return nil
+            end,
           },
         },
       },
@@ -174,42 +185,73 @@ vim.opt.laststatus = 3
 
 -- 设置图片保存路径
 local image_save_path = vim.fn.stdpath("data") .. "/avante/images"
+vim.fn.mkdir(image_save_path, "p")
 
 -- 设置 AvanteInput 缓冲区的 ctrl+v 处理
 vim.api.nvim_create_autocmd("FileType", {
   pattern = "AvanteInput",
   callback = function()
     vim.keymap.set({"n", "i"}, "<C-v>", function()
+      -- 1. 检查剪贴板内容
+      local clipboard = vim.fn.getreg('+')
+      vim.notify("Clipboard content type: " .. type(clipboard), vim.log.levels.DEBUG)
+      
       local ok, img_clip = pcall(require, "img-clip")
       if not ok then
-        -- 如果 img-clip 加载失败，使用系统默认粘贴
-        vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-v>", true, true, true), "m", true)
+        vim.notify("Failed to load img-clip: " .. tostring(img_clip), vim.log.levels.ERROR)
         return
       end
 
+      -- 2. 检查保存路径
+      vim.notify("Image save path: " .. image_save_path, vim.log.levels.DEBUG)
+      
+      -- 3. 检查目录权限
+      local stat = vim.loop.fs_stat(image_save_path)
+      vim.notify("Directory stats: " .. vim.inspect(stat), vim.log.levels.DEBUG)
+      
+      -- 4. 生成唯一文件名
+      local file_name = os.date("%Y-%m-%d-%H-%M-%S") .. "_" .. tostring(os.clock()):gsub("%.", "") .. ".png"
+      local full_path = image_save_path .. "/" .. file_name
+      
       local result = img_clip.paste_image({
         dir_path = image_save_path,
         use_absolute_path = true,
         show_notification = true,
-        -- 确保文件名只包含安全的字符
-        file_name = os.date("%Y-%m-%d-%H-%M-%S") .. ".png",
-        default = {
-          embed_image_as_base64 = false,
-          prompt_for_file_name = false,
-          drag_and_drop = {
-            insert_mode = true,
-          },
-          use_absolute_path = true,
-        },
+        file_name = file_name,
+        on_error = function(err)
+          -- 5. 详细的错误信息
+          vim.notify("Failed to save image: " .. tostring(err) .. "\nStack: " .. debug.traceback(), vim.log.levels.ERROR)
+        end,
+        on_success = function(path)
+          -- 6. 检查保存的文件
+          local file_stat = vim.loop.fs_stat(path)
+          vim.notify("Saved image stats: " .. vim.inspect(file_stat), vim.log.levels.INFO)
+          
+          -- 7. 尝试读取文件内容
+          local f = io.open(path, "rb")
+          if f then
+            local content = f:read("*all")
+            f:close()
+            vim.notify("File size: " .. #content .. " bytes", vim.log.levels.INFO)
+          else
+            vim.notify("Cannot read saved file", vim.log.levels.ERROR)
+          end
+        end,
+        before_paste = function()
+          -- 8. 保存前的回调
+          vim.notify("About to paste image", vim.log.levels.INFO)
+        end,
       })
+
+      -- 9. 检查返回结果
+      vim.notify("Paste result: " .. tostring(result), vim.log.levels.DEBUG)
+      
       if not result then
-        -- 检查剪贴板内容
         local clipboard = vim.fn.getreg('+')
+        vim.notify("Fallback clipboard content: " .. tostring(clipboard), vim.log.levels.DEBUG)
         if clipboard:match("^image: ") then
-          -- 如果是图片路径，直接插入
           vim.api.nvim_put({clipboard}, 'c', true, true)
         else
-          -- 否则使用默认粘贴
           vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-v>", true, true, true), "m", true)
         end
       end
