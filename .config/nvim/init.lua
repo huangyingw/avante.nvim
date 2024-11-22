@@ -194,25 +194,20 @@ vim.api.nvim_create_autocmd("FileType", {
     vim.keymap.set({"n", "i"}, "<C-v>", function()
       -- 1. 检查剪贴板内容
       local clipboard = vim.fn.getreg('+')
-      vim.notify("Clipboard content type: " .. type(clipboard), vim.log.levels.DEBUG)
-      
+
       local ok, img_clip = pcall(require, "img-clip")
       if not ok then
         vim.notify("Failed to load img-clip: " .. tostring(img_clip), vim.log.levels.ERROR)
         return
       end
 
-      -- 2. 检查保存路径
-      vim.notify("Image save path: " .. image_save_path, vim.log.levels.DEBUG)
-      
       -- 3. 检查目录权限
       local stat = vim.loop.fs_stat(image_save_path)
-      vim.notify("Directory stats: " .. vim.inspect(stat), vim.log.levels.DEBUG)
-      
+
       -- 4. 生成唯一文件名
       local file_name = os.date("%Y-%m-%d-%H-%M-%S") .. "_" .. tostring(os.clock()):gsub("%.", "") .. ".png"
       local full_path = image_save_path .. "/" .. file_name
-      
+
       local result = img_clip.paste_image({
         dir_path = image_save_path,
         use_absolute_path = true,
@@ -225,27 +220,20 @@ vim.api.nvim_create_autocmd("FileType", {
         on_success = function(path)
           -- 6. 检查保存的文件
           local file_stat = vim.loop.fs_stat(path)
-          vim.notify("Saved image stats: " .. vim.inspect(file_stat), vim.log.levels.INFO)
-          
+
           -- 7. 尝试读取文件内容
           local f = io.open(path, "rb")
           if f then
             local content = f:read("*all")
             f:close()
-            vim.notify("File size: " .. #content .. " bytes", vim.log.levels.INFO)
           else
             vim.notify("Cannot read saved file", vim.log.levels.ERROR)
           end
         end,
         before_paste = function()
-          -- 8. 保存前的回调
-          vim.notify("About to paste image", vim.log.levels.INFO)
         end,
       })
 
-      -- 9. 检查返回结果
-      vim.notify("Paste result: " .. tostring(result), vim.log.levels.DEBUG)
-      
       if not result then
         local clipboard = vim.fn.getreg('+')
         vim.notify("Fallback clipboard content: " .. tostring(clipboard), vim.log.levels.DEBUG)
