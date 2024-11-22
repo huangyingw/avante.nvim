@@ -192,56 +192,42 @@ vim.api.nvim_create_autocmd("FileType", {
   pattern = "AvanteInput",
   callback = function()
     vim.keymap.set({"n", "i"}, "<C-v>", function()
-      -- 1. 检查剪贴板内容
+      -- 首先尝试获取普通剪贴板内容
       local clipboard = vim.fn.getreg('+')
-
-      local ok, img_clip = pcall(require, "img-clip")
-      if not ok then
-        vim.notify("Failed to load img-clip: " .. tostring(img_clip), vim.log.levels.ERROR)
+      
+      -- 如果剪贴板有普通文本内容，直接执行普通粘贴
+      if clipboard ~= "" then
+        vim.notify("执行普通文本粘贴", vim.log.levels.INFO)
+        vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-v>", true, true, true), "n", true)
         return
       end
 
-      -- 3. 检查目录权限
-      local stat = vim.loop.fs_stat(image_save_path)
+      -- 尝试加载 img-clip
+      local ok, img_clip = pcall(require, "img-clip")
+      if not ok then
+        vim.notify("Failed to load img-clip: " .. tostring(img_clip), vim.log.levels.ERROR)
+        vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-v>", true, true, true), "n", true)
+        return
+      end
 
-      -- 4. 生成唯一文件名
-      local file_name = os.date("%Y-%m-%d-%H-%M-%S") .. "_" .. tostring(os.clock()):gsub("%.", "") .. ".png"
-      local full_path = image_save_path .. "/" .. file_name
-
+      -- 尝试粘贴图片
       local result = img_clip.paste_image({
         dir_path = image_save_path,
         use_absolute_path = true,
         show_notification = true,
-        file_name = file_name,
+        file_name = os.date("%Y-%m-%d-%H-%M-%S") .. "_" .. tostring(os.clock()):gsub("%.", "") .. ".png",
         on_error = function(err)
-          -- 5. 详细的错误信息
-          vim.notify("Failed to save image: " .. tostring(err) .. "\nStack: " .. debug.traceback(), vim.log.levels.ERROR)
+          vim.notify("不是图片内容，执行普通粘贴", vim.log.levels.INFO)
+          vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-v>", true, true, true), "n", true)
         end,
         on_success = function(path)
-          -- 6. 检查保存的文件
-          local file_stat = vim.loop.fs_stat(path)
-
-          -- 7. 尝试读取文件内容
-          local f = io.open(path, "rb")
-          if f then
-            local content = f:read("*all")
-            f:close()
-          else
-            vim.notify("Cannot read saved file", vim.log.levels.ERROR)
-          end
-        end,
-        before_paste = function()
+          vim.notify("成功粘贴图片: " .. path, vim.log.levels.INFO)
         end,
       })
 
       if not result then
-        local clipboard = vim.fn.getreg('+')
-        vim.notify("Fallback clipboard content: " .. tostring(clipboard), vim.log.levels.DEBUG)
-        if clipboard:match("^image: ") then
-          vim.api.nvim_put({clipboard}, 'c', true, true)
-        else
-          vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-v>", true, true, true), "m", true)
-        end
+        vim.notify("尝试普通粘贴", vim.log.levels.INFO)
+        vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-v>", true, true, true), "n", true)
       end
     end, { buffer = true, noremap = true })
   end,
