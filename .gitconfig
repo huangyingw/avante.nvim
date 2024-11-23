@@ -1,17 +1,17 @@
 [deploy]
   host = localhost
   path = ~/loadrc/avante.nvim
-[remote "github"]
-  url = git@github.com:huangyingw/avante.nvim.git
-  fetch = +refs/heads/*:refs/remotes/github/*
-[push]
-  remote = github
 [remote "origin"]
-  url = git@github.com:yetone/avante.nvim.git
+  url = git@github.com:huangyingw/avante.nvim.git
   fetch = +refs/heads/*:refs/remotes/origin/*
+[push]
+  remote = origin
+[remote "yetone"]
+  url = git@github.com:yetone/avante.nvim.git
+  fetch = +refs/heads/*:refs/remotes/yetone/*
 [gsync]
-    remote = origin
-    target = origin/main
+  remote = yetone
+  target = yetone/main
 [gdio]
   ignore = ./.config/nvim/init.lua
   ignore = ./.cursorrules
