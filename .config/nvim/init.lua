@@ -194,7 +194,7 @@ vim.api.nvim_create_autocmd("FileType", {
     vim.keymap.set({"n", "i"}, "<C-v>", function()
       -- 首先尝试获取普通剪贴板内容
       local clipboard = vim.fn.getreg('+')
-      
+
       -- 如果剪贴板有普通文本内容，直接执行普通粘贴
       if clipboard ~= "" then
         vim.notify("执行普通文本粘贴", vim.log.levels.INFO)
@@ -267,11 +267,6 @@ vim.api.nvim_create_autocmd("FileType", {
 vim.api.nvim_create_autocmd("FileType", {
   pattern = {"AvanteInput", "AvanteOutput"},
   callback = function()
-    -- 获取总窗口宽度
-    local total_width = vim.o.columns
-    -- 计算目标宽度 (80% 的总宽度)
-    local target_width = math.floor(total_width * 0.8)
-    -- 设置窗口宽度
-    vim.api.nvim_win_set_width(0, target_width)
+    vim.api.nvim_win_set_width(0, vim.o.columns)
   end
 })
