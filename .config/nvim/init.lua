@@ -128,45 +128,6 @@ require("lazy").setup({
       },
     },
   },
-  {
-    "pseewald/vim-anyfold",
-    dir = "~/.vim/bundle/vim-anyfold",
-    ft = "*",
-    config = function()
-      if vim.fn.filereadable(vim.fn.expand("~/.vim/bundle/vim-anyfold/plugin/anyfold.vim")) ~= 1 then
-        return
-      end
-
-      vim.g.anyfold_fold_display = 0
-      vim.g.anyfold_fold_comments = 1
-
-      local anyfold_group = vim.api.nvim_create_augroup("anyfold_group", { clear = true })
-
-      vim.api.nvim_create_autocmd("VimEnter", {
-        group = anyfold_group,
-        callback = function()
-          vim.defer_fn(function()
-            if vim.fn.exists('*anyfold#init') == 1 then
-              vim.fn['anyfold#init'](0)
-              vim.opt_local.foldmethod = "expr"
-              vim.opt_local.foldexpr = "anyfold#fold()"
-            end
-          end, 100)
-        end
-      })
-
-      vim.api.nvim_create_autocmd("BufEnter", {
-        group = anyfold_group,
-        pattern = "*",
-        callback = function()
-          if vim.fn.exists('*anyfold#init') == 1 then
-            vim.opt_local.foldmethod = "expr"
-            vim.opt_local.foldexpr = "anyfold#fold()"
-          end
-        end
-      })
-    end
-  }
 }, {
   performance = {
     rtp = {
