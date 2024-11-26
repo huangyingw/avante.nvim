@@ -207,6 +207,9 @@ P.clear = function()
 
   if not P.cache_path:exists() then P.cache_path:mkdir({ parents = true }) end
   if not P.history_path:exists() then P.history_path:mkdir({ parents = true }) end
+  
+  -- Clear the history file cache
+  history_file_cache = LRUCache:new(12)
 end
 
 return P
