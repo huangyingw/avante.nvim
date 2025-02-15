@@ -17,12 +17,28 @@ function Build-FromSource($feature) {
 
     cargo build --release --features=$feature
 
+    $SCRIPT_DIR = $PSScriptRoot
     $targetTokenizerFile = "avante_tokenizers.dll"
     $targetTemplatesFile = "avante_templates.dll"
-    Copy-Item (Join-Path "target\release\avante_tokenizers.dll") (Join-Path $BuildDir $targetTokenizerFile)
-    Copy-Item (Join-Path "target\release\avante_templates.dll") (Join-Path $BuildDir $targetTemplatesFile)
+    $targetRepoMapFile = "avante_repo_map.dll"
+    Copy-Item (Join-Path $SCRIPT_DIR "target\release\avante_tokenizers.dll") (Join-Path $BuildDir $targetTokenizerFile)
+    Copy-Item (Join-Path $SCRIPT_DIR "target\release\avante_templates.dll") (Join-Path $BuildDir $targetTemplatesFile)
+    Copy-Item (Join-Path $SCRIPT_DIR "target\release\avante_repo_map.dll") (Join-Path $BuildDir $targetRepoMapFile)
 
     Remove-Item -Recurse -Force "target"
+}
+
+function Test-Command($cmdname) {
+    return $null -ne (Get-Command $cmdname -ErrorAction SilentlyContinue)
+}
+
+function Test-GHAuth {
+    try {
+        $null = gh api user
+        return $true
+    } catch {
+        return $false
+    }
 }
 
 function Download-Prebuilt($feature) {
@@ -46,18 +62,23 @@ function Download-Prebuilt($feature) {
     # Set the artifact name pattern
     $ARTIFACT_NAME_PATTERN = "avante_lib-$PLATFORM-$ARCH-$LUA_VERSION"
 
-    # Get the artifact download URL
-    $LATEST_RELEASE = Invoke-RestMethod -Uri "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest"
-    $ARTIFACT_URL = $LATEST_RELEASE.assets | Where-Object { $_.name -like "*$ARTIFACT_NAME_PATTERN*" } | Select-Object -ExpandProperty browser_download_url
+    $TempFile = Get-Item ([System.IO.Path]::GetTempFilename()) | Rename-Item -NewName { $_.Name + ".zip" } -PassThru
+
+    if ((Test-Command "gh") -and (Test-GHAuth)) {
+        gh release download --repo "$REPO_OWNER/$REPO_NAME" --pattern "*$ARTIFACT_NAME_PATTERN*" --output $TempFile --clobber
+    } else {
+      # Get the artifact download URL
+      $LATEST_RELEASE = Invoke-RestMethod -Uri "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest"
+      $ARTIFACT_URL = $LATEST_RELEASE.assets | Where-Object { $_.name -like "*$ARTIFACT_NAME_PATTERN*" } | Select-Object -ExpandProperty browser_download_url
+
+      # Download and extract the artifact
+      Invoke-WebRequest -Uri $ARTIFACT_URL -OutFile $TempFile
+    }
 
     # Create target directory if it doesn't exist
     if (-not (Test-Path $TARGET_DIR)) {
         New-Item -ItemType Directory -Path $TARGET_DIR | Out-Null
     }
-
-    # Download and extract the artifact
-    $TempFile = Get-Item ([System.IO.Path]::GetTempFilename()) | Rename-Item -NewName { $_.Name + ".zip" } -PassThru
-    Invoke-WebRequest -Uri $ARTIFACT_URL -OutFile $TempFile
     Expand-Archive -Path $TempFile -DestinationPath $TARGET_DIR -Force
     Remove-Item $TempFile
 }

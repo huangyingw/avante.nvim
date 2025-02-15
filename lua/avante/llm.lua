@@ -8,7 +8,7 @@ local Utils = require("avante.utils")
 local Config = require("avante.config")
 local Path = require("avante.path")
 local P = require("avante.providers")
-local Logger = require("avante.logger")
+local LLMTools = require("avante.llm_tools")
 
 ---@class avante.LLM
 local M = {}
@@ -19,14 +19,14 @@ M.CANCEL_PATTERN = "AvanteLLMEscape"
 
 local group = api.nvim_create_augroup("avante_llm", { clear = true })
 
----@param opts StreamOptions
----@param Provider AvanteProviderFunctor
-M._stream = function(opts, Provider)
-  -- print opts
+---@param opts GeneratePromptsOptions
+---@return AvantePromptOptions
+M.generate_prompts = function(opts)
+  local Provider = opts.provider or P[Config.provider]
   local mode = opts.mode or "planning"
-  ---@type AvanteProviderFunctor
-  local _, body_opts = P.parse_config(Provider)
-  local max_tokens = body_opts.max_tokens or 4096
+  ---@type AvanteProviderFunctor | AvanteBedrockProviderFunctor
+  local _, request_body = P.parse_config(Provider)
+  local max_tokens = request_body.max_tokens or 4096
 
   -- Check if the instructions contains an image path
   local image_paths = {}
@@ -46,19 +46,20 @@ M._stream = function(opts, Provider)
   end
   instructions = table.concat(lines, "\n")
 
-  Path.prompts.initialize(Path.prompts.get(opts.bufnr))
+  local project_root = Utils.root.get()
+  Path.prompts.initialize(Path.prompts.get(project_root))
 
-  local filepath = Utils.relative_path(api.nvim_buf_get_name(opts.bufnr))
+  local system_info = Utils.get_system_info()
 
   local template_opts = {
     use_xml_format = Provider.use_xml_format,
     ask = opts.ask, -- TODO: add mode without ask instruction
     code_lang = opts.code_lang,
-    filepath = filepath,
-    file_content = opts.file_content,
+    selected_files = opts.selected_files,
     selected_code = opts.selected_code,
     project_context = opts.project_context,
     diagnostics = opts.diagnostics,
+    system_info = system_info,
   }
 
   local system_prompt = Path.prompts.render_mode(mode, template_opts)
@@ -76,8 +77,10 @@ M._stream = function(opts, Provider)
     if diagnostics ~= "" then table.insert(messages, { role = "user", content = diagnostics }) end
   end
 
-  local code_context = Path.prompts.render_file("_context.avanterules", template_opts)
-  if code_context ~= "" then table.insert(messages, { role = "user", content = code_context }) end
+  if #opts.selected_files > 0 or opts.selected_code ~= nil then
+    local code_context = Path.prompts.render_file("_context.avanterules", template_opts)
+    if code_context ~= "" then table.insert(messages, { role = "user", content = code_context }) end
+  end
 
   if opts.use_xml_format then
     table.insert(messages, { role = "user", content = string.format("<question>%s</question>", instructions) })
@@ -111,18 +114,64 @@ M._stream = function(opts, Provider)
   end
 
   ---@type AvantePromptOptions
-  local code_opts = {
+  return {
     system_prompt = system_prompt,
     messages = messages,
     image_paths = image_paths,
+    tools = opts.tools,
+    tool_histories = opts.tool_histories,
   }
+end
+
+---@param opts GeneratePromptsOptions
+---@return integer
+M.calculate_tokens = function(opts)
+  local prompt_opts = M.generate_prompts(opts)
+  local tokens = Utils.tokens.calculate_tokens(prompt_opts.system_prompt)
+  for _, message in ipairs(prompt_opts.messages) do
+    tokens = tokens + Utils.tokens.calculate_tokens(message.content)
+  end
+  return tokens
+end
+
+---@param opts StreamOptions
+M._stream = function(opts)
+  local Provider = opts.provider or P[Config.provider]
+
+  local prompt_opts = M.generate_prompts(opts)
+
   ---@type string
   local current_event_state = nil
 
   ---@type AvanteHandlerOptions
-  local handler_opts = { on_chunk = opts.on_chunk, on_complete = opts.on_complete }
+  local handler_opts = {
+    on_start = opts.on_start,
+    on_chunk = opts.on_chunk,
+    on_stop = function(stop_opts)
+      if stop_opts.reason == "tool_use" and stop_opts.tool_use_list then
+        local old_tool_histories = vim.deepcopy(opts.tool_histories) or {}
+        for _, tool_use in ipairs(stop_opts.tool_use_list) do
+          local result, error = LLMTools.process_tool_use(opts.tools, tool_use, opts.on_tool_log)
+          local tool_result = {
+            tool_use_id = tool_use.id,
+            content = error ~= nil and error or result,
+            is_error = error ~= nil,
+          }
+          table.insert(old_tool_histories, { tool_result = tool_result, tool_use = tool_use })
+        end
+        local new_opts = vim.tbl_deep_extend("force", opts, {
+          tool_histories = old_tool_histories,
+        })
+        return M._stream(new_opts)
+      end
+      return opts.on_stop(stop_opts)
+    end,
+  }
+
   ---@type AvanteCurlOutput
-  local spec = Provider.parse_curl_args(Provider, code_opts)
+  local spec = Provider.parse_curl_args(Provider, prompt_opts)
+
+  local resp_ctx = {}
 
   ---@param line string
   local function parse_stream_data(line)
@@ -132,7 +181,7 @@ M._stream = function(opts, Provider)
       return
     end
     local data_match = line:match("^data: (.+)$")
-    if data_match then Provider.parse_response(data_match, current_event_state, handler_opts) end
+    if data_match then Provider.parse_response(resp_ctx, data_match, current_event_state, handler_opts) end
   end
 
   local function parse_response_without_stream(data)
@@ -163,12 +212,12 @@ M._stream = function(opts, Provider)
     stream = function(err, data, _)
       if err then
         completed = true
-        opts.on_complete(err)
+        handler_opts.on_stop({ reason = "error", error = err })
         return
       end
       if not data then return end
       vim.schedule(function()
-        if Config.options[Config.provider] == nil and Provider.parse_stream_data ~= nil then
+        if Config[Config.provider] == nil and Provider.parse_stream_data ~= nil then
           if Provider.parse_response ~= nil then
             Utils.warn(
               "parse_stream_data and parse_response are mutually exclusive, and thus parse_response will be ignored. Make sure that you handle the incoming data correctly.",
@@ -207,7 +256,7 @@ M._stream = function(opts, Provider)
       active_job = nil
       completed = true
       cleanup()
-      opts.on_complete(err)
+      handler_opts.on_stop({ reason = "error", error = err })
     end,
     callback = function(result)
       Logger.debug_response({
@@ -229,9 +278,10 @@ M._stream = function(opts, Provider)
         vim.schedule(function()
           if not completed then
             completed = true
-            opts.on_complete(
-              "API request failed with status " .. result.status .. ". Body: " .. vim.inspect(result.body)
-            )
+            handler_opts.on_stop({
+              reason = "error",
+              error = "API request failed with status " .. result.status .. ". Body: " .. vim.inspect(result.body),
+            })
           end
         end)
       end
@@ -263,7 +313,7 @@ M._stream = function(opts, Provider)
   return active_job
 end
 
-local function _merge_response(first_response, second_response, opts, Provider)
+local function _merge_response(first_response, second_response, opts)
   local prompt = "\n" .. Config.dual_boost.prompt
   prompt = prompt
   :gsub("{{[%s]*provider1_output[%s]*}}", first_response)
@@ -271,31 +321,31 @@ local function _merge_response(first_response, second_response, opts, Provider)
 
   prompt = prompt .. "\n"
 
-  -- append this reference prompt to the code_opts messages at last
+  -- append this reference prompt to the prompt_opts messages at last
   opts.instructions = opts.instructions .. prompt
 
-  M._stream(opts, Provider)
+  M._stream(opts)
 end
 
-local function _collector_process_responses(collector, opts, Provider)
+local function _collector_process_responses(collector, opts)
   if not collector[1] or not collector[2] then
     Utils.error("One or both responses failed to complete")
     return
   end
-  _merge_response(collector[1], collector[2], opts, Provider)
+  _merge_response(collector[1], collector[2], opts)
 end
 
-local function _collector_add_response(collector, index, response, opts, Provider)
+local function _collector_add_response(collector, index, response, opts)
   collector[index] = response
   collector.count = collector.count + 1
 
   if collector.count == 2 then
     collector.timer:stop()
-    _collector_process_responses(collector, opts, Provider)
+    _collector_process_responses(collector, opts)
   end
 end
 
-M._dual_boost_stream = function(opts, Provider, Provider1, Provider2)
+M._dual_boost_stream = function(opts, Provider1, Provider2)
   Utils.debug("Starting Dual Boost Stream")
 
   local collector = {
@@ -314,7 +364,7 @@ M._dual_boost_stream = function(opts, Provider, Provider1, Provider2)
         Utils.warn("Dual boost stream timeout reached")
         collector.timer:stop()
         -- Process whatever responses we have
-        _collector_process_responses(collector, opts, Provider)
+        _collector_process_responses(collector, opts)
       end
     end)
   )
@@ -326,56 +376,94 @@ M._dual_boost_stream = function(opts, Provider, Provider1, Provider2)
       on_chunk = function(chunk)
         if chunk then response = response .. chunk end
       end,
-      on_complete = function(err)
-        if err then
-          Utils.error(string.format("Stream %d failed: %s", index, err))
+      on_stop = function(stop_opts)
+        if stop_opts.error then
+          Utils.error(string.format("Stream %d failed: %s", index, stop_opts.error))
           return
         end
         Utils.debug(string.format("Response %d completed", index))
-        _collector_add_response(collector, index, response, opts, Provider)
+        _collector_add_response(collector, index, response, opts)
       end,
     })
   end
 
   -- Start both streams
   local success, err = xpcall(function()
-    M._stream(create_stream_opts(1), Provider1)
-    M._stream(create_stream_opts(2), Provider2)
+    local opts1 = create_stream_opts(1)
+    opts1.provider = Provider1
+    M._stream(opts1)
+    local opts2 = create_stream_opts(2)
+    opts2.provider = Provider2
+    M._stream(opts2)
   end, function(err) return err end)
   if not success then Utils.error("Failed to start dual_boost streams: " .. tostring(err)) end
 end
 
 ---@alias LlmMode "planning" | "editing" | "suggesting"
 ---
+---@class SelectedFiles
+---@field path string
+---@field content string
+---@field file_type string
+---
 ---@class TemplateOptions
 ---@field use_xml_format boolean
 ---@field ask boolean
 ---@field question string
 ---@field code_lang string
----@field file_content string
 ---@field selected_code string | nil
 ---@field project_context string | nil
+---@field selected_files SelectedFiles[] | nil
 ---@field diagnostics string | nil
 ---@field history_messages AvanteLLMMessage[]
 ---
----@class StreamOptions: TemplateOptions
+---@class GeneratePromptsOptions: TemplateOptions
 ---@field ask boolean
----@field bufnr integer
 ---@field instructions string
 ---@field mode LlmMode
----@field provider AvanteProviderFunctor | nil
----@field on_chunk AvanteChunkParser
----@field on_complete AvanteCompleteParser
+---@field provider AvanteProviderFunctor | AvanteBedrockProviderFunctor | nil
+---@field tools? AvanteLLMTool[]
+---@field tool_histories? AvanteLLMToolHistory[]
+---
+---@class AvanteLLMToolHistory
+---@field tool_result? AvanteLLMToolResult
+---@field tool_use? AvanteLLMToolUse
+---
+---@class StreamOptions: GeneratePromptsOptions
+---@field on_start AvanteLLMStartCallback
+---@field on_chunk AvanteLLMChunkCallback
+---@field on_stop AvanteLLMStopCallback
+---@field on_tool_log? function(tool_name: string, log: string): nil
 
 ---@param opts StreamOptions
 M.stream = function(opts)
-  if opts.on_chunk ~= nil then opts.on_chunk = vim.schedule_wrap(opts.on_chunk) end
-  if opts.on_complete ~= nil then opts.on_complete = vim.schedule_wrap(opts.on_complete) end
-  local Provider = opts.provider or P[Config.provider]
-  if Config.dual_boost.enabled then
-    M._dual_boost_stream(opts, Provider, P[Config.dual_boost.first_provider], P[Config.dual_boost.second_provider])
+  local is_completed = false
+  if opts.on_tool_log ~= nil then
+    local original_on_tool_log = opts.on_tool_log
+    opts.on_tool_log = vim.schedule_wrap(function(tool_name, log)
+      if not original_on_tool_log then return end
+      return original_on_tool_log(tool_name, log)
+    end)
+  end
+  if opts.on_chunk ~= nil then
+    local original_on_chunk = opts.on_chunk
+    opts.on_chunk = vim.schedule_wrap(function(chunk)
+      if is_completed then return end
+      return original_on_chunk(chunk)
+    end)
+  end
+  if opts.on_stop ~= nil then
+    local original_on_stop = opts.on_stop
+    opts.on_stop = vim.schedule_wrap(function(stop_opts)
+      if is_completed then return end
+      if stop_opts.reason == "complete" or stop_opts.reason == "error" then is_completed = true end
+      return original_on_stop(stop_opts)
+    end)
+  end
+  if Config.dual_boost.enabled and opts.mode == "planning" then
+    M._dual_boost_stream(opts, P[Config.dual_boost.first_provider], P[Config.dual_boost.second_provider])
   else
-    M._stream(opts, Provider)
+    M._stream(opts)
   end
 end
 

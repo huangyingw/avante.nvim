@@ -1,15 +1,25 @@
 ---NOTE: user will be merged with defaults and
 ---we add a default var_accessor for this table to config values.
 
+---@alias WebSearchEngineProviderResponseBodyFormatter fun(body: table): (string, string?)
+
 local Utils = require("avante.utils")
+
+---@class avante.file_selector.IParams
+---@field public title      string
+---@field public filepaths  string[]
+---@field public handler    fun(filepaths: string[]|nil): nil
 
 ---@class avante.CoreConfig: avante.Config
 local M = {}
 ---@class avante.Config
-M.defaults = {
+M._defaults = {
   debug = false,
   ---@alias Provider "claude" | "openai" | "azure" | "gemini" | "vertex" | "cohere" | "copilot" | string
   provider = "claude", -- Only recommend using Claude
+  -- WARNING: Since auto-suggestions are a high-frequency operation and therefore expensive,
+  -- currently designating it as `copilot` provider is dangerous because: https://github.com/yetone/avante.nvim/issues/1048
+  -- Of course, you can reduce the request frequency by increasing `suggestion.debounce`.
   auto_suggestions_provider = "claude",
   ---@alias Tokenizer "tiktoken" | "hf"
   -- Used for counting tokens and encoding text.
@@ -17,6 +27,72 @@ M.defaults = {
   -- For most providers that we support we will determine this automatically.
   -- If you wish to use a given implementation, then you can override it here.
   tokenizer = "tiktoken",
+  web_search_engine = {
+    provider = "tavily",
+    providers = {
+      tavily = {
+        api_key_name = "TAVILY_API_KEY",
+        extra_request_body = {
+          include_answer = "basic",
+        },
+        ---@type WebSearchEngineProviderResponseBodyFormatter
+        format_response_body = function(body) return body.anwser, nil end,
+      },
+      serpapi = {
+        api_key_name = "SERPAPI_API_KEY",
+        extra_request_body = {
+          engine = "google",
+          google_domain = "google.com",
+        },
+        ---@type WebSearchEngineProviderResponseBodyFormatter
+        format_response_body = function(body)
+          if body.answer_box ~= nil then return body.answer_box.result, nil end
+          if body.organic_results ~= nil then
+            local jsn = vim
+              .iter(body.organic_results)
+              :map(
+                function(result)
+                  return {
+                    title = result.title,
+                    link = result.link,
+                    snippet = result.snippet,
+                  }
+                end
+              )
+              :take(5)
+              :totable()
+            return vim.json.encode(jsn), nil
+          end
+          return "", nil
+        end,
+      },
+      google = {
+        api_key_name = "GOOGLE_SEARCH_API_KEY",
+        engine_id_name = "GOOGLE_SEARCH_ENGINE_ID",
+        extra_request_body = {},
+        ---@type WebSearchEngineProviderResponseBodyFormatter
+        format_response_body = function(body)
+          if body.items ~= nil then
+            local jsn = vim
+              .iter(body.items)
+              :map(
+                function(result)
+                  return {
+                    title = result.title,
+                    link = result.link,
+                    snippet = result.snippet,
+                  }
+                end
+              )
+              :take(5)
+              :totable()
+            return vim.json.encode(jsn), nil
+          end
+          return "", nil
+        end,
+      },
+    },
+  },
   ---@type AvanteSupportedProvider
   openai = {
     endpoint = "https://api.openai.com/v1",
@@ -52,6 +128,13 @@ M.defaults = {
       temperature = 0,
       max_tokens = 4096,
     },
+  ---@type AvanteSupportedProvider
+  bedrock = {
+    model = "anthropic.claude-3-5-sonnet-20240620-v1:0",
+    timeout = 30000, -- Timeout in milliseconds
+    temperature = 0,
+    max_tokens = 8000,
+  },
   ---@type AvanteSupportedProvider
   gemini = {
     endpoint = "https://generativelanguage.googleapis.com/v1beta/models",
@@ -114,20 +197,28 @@ M.defaults = {
     timeout = 60000, -- Timeout in milliseconds
   },
   ---Specify the behaviour of avante.nvim
-  ---1. auto_apply_diff_after_generation: Whether to automatically apply diff after LLM response.
+  ---1. auto_focus_sidebar              : Whether to automatically focus the sidebar when opening avante.nvim. Default to true.
+  ---2. auto_suggestions = false, -- Whether to enable auto suggestions. Default to false.
+  ---3. auto_apply_diff_after_generation: Whether to automatically apply diff after LLM response.
   ---                                     This would simulate similar behaviour to cursor. Default to false.
-  ---2. auto_set_keymaps                : Whether to automatically set the keymap for the current line. Default to true.
+  ---4. auto_set_keymaps                : Whether to automatically set the keymap for the current line. Default to true.
   ---                                     Note that avante will safely set these keymap. See https://github.com/yetone/avante.nvim/wiki#keymaps-and-api-i-guess for more details.
-  ---3. auto_set_highlight_group        : Whether to automatically set the highlight group for the current line. Default to true.
-  ---4. support_paste_from_clipboard    : Whether to support pasting image from clipboard. This will be determined automatically based whether img-clip is available or not.
-  ---5. minimize_diff                   : Whether to remove unchanged lines when applying a code block
+  ---5. auto_set_highlight_group        : Whether to automatically set the highlight group for the current line. Default to true.
+  ---6. jump_result_buffer_on_finish = false, -- Whether to automatically jump to the result buffer after generation
+  ---7. support_paste_from_clipboard    : Whether to support pasting image from clipboard. This will be determined automatically based whether img-clip is available or not.
+  ---8. minimize_diff                   : Whether to remove unchanged lines when applying a code block
+  ---9. enable_token_counting           : Whether to enable token counting. Default to true.
   behaviour = {
+    auto_focus_sidebar = true,
     auto_suggestions = false, -- Experimental stage
+    auto_suggestions_respect_ignore = false,
     auto_set_highlight_group = true,
     auto_set_keymaps = true,
     auto_apply_diff_after_generation = false,
+    jump_result_buffer_on_finish = false,
     support_paste_from_clipboard = false,
     minimize_diff = true,
+    enable_token_counting = true,
   },
   history = {
     max_tokens = 4096,
@@ -186,6 +277,12 @@ M.defaults = {
       apply_cursor = "a",
       switch_windows = "<Tab>",
       reverse_switch_windows = "<S-Tab>",
+      remove_file = "d",
+      add_file = "@",
+      close = { "<Esc>", "q" },
+    },
+    files = {
+      add_current = "<leader>ac", -- Add current buffer to selected files
     },
   },
   windows = {
@@ -232,10 +329,21 @@ M.defaults = {
     ignore_patterns = { "%.git", "%.worktree", "__pycache__", "node_modules" }, -- ignore files matching these
     negate_patterns = {}, -- negate ignore files matching these.
   },
+  --- @class AvanteFileSelectorConfig
+  file_selector = {
+    --- @alias FileSelectorProvider "native" | "fzf" | "mini.pick" | "snacks" | "telescope" | string | fun(params: avante.file_selector.IParams|nil): nil
+    provider = "native",
+    -- Options override for custom providers
+    provider_opts = {},
+  },
+  suggestion = {
+    debounce = 600,
+    throttle = 600,
+  },
 }
 
 ---@type avante.Config
-M.options = {}
+M._options = {}
 
 ---@class avante.ConflictConfig: AvanteConflictConfig
 ---@field mappings AvanteConflictMappings
@@ -249,9 +357,9 @@ M.providers = {}
 function M.setup(opts)
   vim.validate({ opts = { opts, "table", true } })
 
-  M.options = vim.tbl_deep_extend(
+  local merged = vim.tbl_deep_extend(
     "force",
-    M.defaults,
+    M._defaults,
     opts or {},
     ---@type avante.Config
     {
@@ -260,8 +368,10 @@ function M.setup(opts)
       },
     }
   )
+
+  M._options = merged
   M.providers = vim
-    .iter(M.defaults)
+    .iter(M._defaults)
     :filter(function(_, value) return type(value) == "table" and value.endpoint ~= nil end)
     :fold({}, function(acc, k)
       acc = vim.list_extend({}, acc)
@@ -269,21 +379,21 @@ function M.setup(opts)
       return acc
     end)
 
-  vim.validate({ provider = { M.options.provider, "string", false } })
+  vim.validate({ provider = { M._options.provider, "string", false } })
 
   M.diff = vim.tbl_deep_extend(
     "force",
     {},
-    M.options.diff,
-    { mappings = M.options.mappings.diff, highlights = M.options.highlights.diff }
+    M._options.diff,
+    { mappings = M._options.mappings.diff, highlights = M._options.highlights.diff }
   )
 
-  if next(M.options.vendors) ~= nil then
-    for k, v in pairs(M.options.vendors) do
-      M.options.vendors[k] = type(v) == "function" and v() or v
+  if next(M._options.vendors) ~= nil then
+    for k, v in pairs(M._options.vendors) do
+      M._options.vendors[k] = type(v) == "function" and v() or v
     end
-    vim.validate({ vendors = { M.options.vendors, "table", true } })
-    M.providers = vim.list_extend(M.providers, vim.tbl_keys(M.options.vendors))
+    vim.validate({ vendors = { M._options.vendors, "table", true } })
+    M.providers = vim.list_extend(M.providers, vim.tbl_keys(M._options.vendors))
   end
 end
 
@@ -291,26 +401,26 @@ end
 function M.override(opts)
   vim.validate({ opts = { opts, "table", true } })
 
-  M.options = vim.tbl_deep_extend("force", M.options, opts or {})
+  M._options = vim.tbl_deep_extend("force", M._options, opts or {})
   M.diff = vim.tbl_deep_extend(
     "force",
     {},
-    M.options.diff,
-    { mappings = M.options.mappings.diff, highlights = M.options.highlights.diff }
+    M._options.diff,
+    { mappings = M._options.mappings.diff, highlights = M._options.highlights.diff }
   )
 
-  if next(M.options.vendors) ~= nil then
-    for k, v in pairs(M.options.vendors) do
-      M.options.vendors[k] = type(v) == "function" and v() or v
+  if next(M._options.vendors) ~= nil then
+    for k, v in pairs(M._options.vendors) do
+      M._options.vendors[k] = type(v) == "function" and v() or v
       if not vim.tbl_contains(M.providers, k) then M.providers = vim.list_extend(M.providers, { k }) end
     end
-    vim.validate({ vendors = { M.options.vendors, "table", true } })
+    vim.validate({ vendors = { M._options.vendors, "table", true } })
   end
 end
 
 M = setmetatable(M, {
   __index = function(_, k)
-    if M.options[k] then return M.options[k] end
+    if M._options[k] then return M._options[k] end
   end,
 })
 
@@ -320,15 +430,15 @@ M.get_window_width = function() return math.ceil(vim.o.columns * (M.windows.widt
 
 ---@param provider Provider
 ---@return boolean
-M.has_provider = function(provider) return M.options[provider] ~= nil or M.vendors[provider] ~= nil end
+M.has_provider = function(provider) return M._options[provider] ~= nil or M.vendors[provider] ~= nil end
 
 ---get supported providers
 ---@param provider Provider
 ---@return AvanteProviderFunctor
 M.get_provider = function(provider)
-  if M.options[provider] ~= nil then
-    return vim.deepcopy(M.options[provider], true)
-  elseif M.vendors[provider] ~= nil then
+  if M._options[provider] ~= nil then
+    return vim.deepcopy(M._options[provider], true)
+  elseif M.vendors and M.vendors[provider] ~= nil then
     return vim.deepcopy(M.vendors[provider], true)
   else
     error("Failed to find provider: " .. provider, 2)
@@ -351,6 +461,7 @@ M.BASE_PROVIDER_KEYS = {
   "use_xml_format",
   "role_map",
   "__inherited_from",
+  "disable_tools",
 }
 
 return M

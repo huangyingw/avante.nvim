@@ -43,6 +43,7 @@ pub struct Variable {
 pub enum Definition {
     Func(Func),
     Class(Class),
+    Module(Class),
     Enum(Enum),
     Variable(Variable),
     Union(Union),
@@ -63,6 +64,7 @@ fn get_ts_language(language: &str) -> Option<LanguageFn> {
         "zig" => Some(tree_sitter_zig::LANGUAGE),
         "scala" => Some(tree_sitter_scala::LANGUAGE),
         "elixir" => Some(tree_sitter_elixir::LANGUAGE),
+        "csharp" => Some(tree_sitter_c_sharp::LANGUAGE),
         _ => None,
     }
 }
@@ -79,6 +81,7 @@ const TYPESCRIPT_QUERY: &str = include_str!("../queries/tree-sitter-typescript-d
 const RUBY_QUERY: &str = include_str!("../queries/tree-sitter-ruby-defs.scm");
 const SCALA_QUERY: &str = include_str!("../queries/tree-sitter-scala-defs.scm");
 const ELIXIR_QUERY: &str = include_str!("../queries/tree-sitter-elixir-defs.scm");
+const CSHARP_QUERY: &str = include_str!("../queries/tree-sitter-c-sharp-defs.scm");
 
 fn get_definitions_query(language: &str) -> Result<Query, String> {
     let ts_language = get_ts_language(language);
@@ -99,6 +102,7 @@ fn get_definitions_query(language: &str) -> Result<Query, String> {
         "ruby" => RUBY_QUERY,
         "scala" => SCALA_QUERY,
         "elixir" => ELIXIR_QUERY,
+        "csharp" => CSHARP_QUERY,
         _ => return Err(format!("Unsupported language: {language}")),
     };
     let query = Query::new(&ts_language.into(), contents)
@@ -129,6 +133,20 @@ fn find_ancestor_by_type<'a>(node: &'a Node, parent_type: &str) -> Option<Node<'
     None
 }
 
+fn find_first_ancestor_by_types<'a>(
+    node: &'a Node,
+    possible_parent_types: &[&str],
+) -> Option<Node<'a>> {
+    let mut parent = node.parent();
+    while let Some(parent_node) = parent {
+        if possible_parent_types.contains(&parent_node.kind()) {
+            return Some(parent_node);
+        }
+        parent = parent_node.parent();
+    }
+    None
+}
+
 fn find_descendant_by_type<'a>(node: &'a Node, child_type: &str) -> Option<Node<'a>> {
     let mut cursor = node.walk();
     for i in 0..node.descendant_count() {
@@ -139,6 +157,24 @@ fn find_descendant_by_type<'a>(node: &'a Node, child_type: &str) -> Option<Node<
         }
     }
     None
+}
+
+fn ruby_method_is_private<'a>(node: &'a Node, source: &'a [u8]) -> bool {
+    let mut prev_sibling = node.prev_sibling();
+    while let Some(prev_sibling_node) = prev_sibling {
+        if prev_sibling_node.kind() == "identifier" {
+            let text = prev_sibling_node.utf8_text(source).unwrap_or_default();
+            if text == "private" {
+                return true;
+            } else if text == "public" || text == "protected" {
+                return false;
+            }
+        } else if prev_sibling_node.kind() == "class" || prev_sibling_node.kind() == "module" {
+            return false;
+        }
+        prev_sibling = prev_sibling_node.prev_sibling();
+    }
+    false
 }
 
 fn find_child_by_type<'a>(node: &'a Node, child_type: &str) -> Option<Node<'a>> {
@@ -189,6 +225,17 @@ fn zig_find_type_in_parent<'a>(node: &'a Node, source: &'a [u8]) -> Option<Strin
     None
 }
 
+fn csharp_is_primary_constructor(node: &Node) -> bool {
+    node.kind() == "parameter_list"
+        && node.parent().map_or(false, |n| {
+            n.kind() == "class_declaration" || n.kind() == "record_declaration"
+        })
+}
+
+fn csharp_find_parent_type_node<'a>(node: &'a Node) -> Option<Node<'a>> {
+    find_first_ancestor_by_types(node, &["class_declaration", "record_declaration"])
+}
+
 fn ex_find_parent_module_declaration_name<'a>(node: &'a Node, source: &'a [u8]) -> Option<String> {
     let mut parent = node.parent();
     while let Some(parent_node) = parent {
@@ -204,6 +251,30 @@ fn ex_find_parent_module_declaration_name<'a>(node: &'a Node, source: &'a [u8]) 
         parent = parent_node.parent();
     }
     None
+}
+
+fn ruby_find_parent_module_declaration_name<'a>(
+    node: &'a Node,
+    source: &'a [u8],
+) -> Option<String> {
+    let mut path_parts = Vec::new();
+    let mut current = Some(*node);
+
+    while let Some(current_node) = current {
+        if current_node.kind() == "module" || current_node.kind() == "class" {
+            if let Some(name_node) = current_node.child_by_field_name("name") {
+                path_parts.push(get_node_text(&name_node, source));
+            }
+        }
+        current = current_node.parent();
+    }
+
+    if path_parts.is_empty() {
+        None
+    } else {
+        path_parts.reverse();
+        Some(path_parts.join("::"))
+    }
 }
 
 fn get_node_text<'a>(node: &'a Node, source: &'a [u8]) -> String {
@@ -272,6 +343,18 @@ fn extract_definitions(language: &str, source: &str) -> Result<Vec<Definition>, 
                 })
             });
         };
+
+    let ensure_module_def = |name: &str, class_def_map: &mut BTreeMap<String, RefCell<Class>>| {
+        class_def_map.entry(name.to_string()).or_insert_with(|| {
+            RefCell::new(Class {
+                name: name.to_string(),
+                type_name: "module".to_string(),
+                methods: vec![],
+                properties: vec![],
+                visibility_modifier: None,
+            })
+        });
+    };
 
     let ensure_enum_def = |name: &str, enum_def_map: &mut BTreeMap<String, RefCell<Enum>>| {
         enum_def_map.entry(name.to_string()).or_insert_with(|| {
@@ -351,6 +434,35 @@ fn extract_definitions(language: &str, source: &str) -> Result<Vec<Definition>, 
                     .map(|n| n.utf8_text(source.as_bytes()).unwrap())
                     .unwrap_or(node_text)
                     .to_string(),
+                "csharp" => {
+                    let mut identifier = node;
+                    // Handle primary constructors (they are direct children of *_declaration)
+                    if *capture_name == "method" && csharp_is_primary_constructor(&node) {
+                        identifier = node.parent().unwrap_or(node);
+                    } else if *capture_name == "class_variable" {
+                        identifier =
+                            find_descendant_by_type(&node, "variable_declarator").unwrap_or(node);
+                    }
+
+                    identifier
+                        .child_by_field_name("name")
+                        .map(|n| n.utf8_text(source.as_bytes()).unwrap())
+                        .unwrap_or(node_text)
+                        .to_string()
+                }
+                "ruby" => {
+                    let name = node
+                        .child_by_field_name("name")
+                        .map(|n| n.utf8_text(source.as_bytes()).unwrap())
+                        .unwrap_or(node_text)
+                        .to_string();
+                    if *capture_name == "class" || *capture_name == "module" {
+                        ruby_find_parent_module_declaration_name(&node, source.as_bytes())
+                            .unwrap_or(name)
+                    } else {
+                        name
+                    }
+                }
                 _ => node
                     .child_by_field_name("name")
                     .map(|n| n.utf8_text(source.as_bytes()).unwrap())
@@ -377,6 +489,11 @@ fn extract_definitions(language: &str, source: &str) -> Result<Vec<Definition>, 
                             } else {
                                 Some(visibility_modifier.to_string())
                             };
+                    }
+                }
+                "module" => {
+                    if !name.is_empty() {
+                        ensure_module_def(&name, &mut class_def_map);
                     }
                 }
                 "enum_item" => {
@@ -472,6 +589,23 @@ fn extract_definitions(language: &str, source: &str) -> Result<Vec<Definition>, 
                     if !name.is_empty() && language == "go" && !is_first_letter_uppercase(&name) {
                         continue;
                     }
+
+                    if language == "csharp" {
+                        let csharp_visibility = find_descendant_by_type(&node, "modifier");
+                        if csharp_visibility.is_none() && !csharp_is_primary_constructor(&node) {
+                            continue;
+                        }
+                        if csharp_visibility.is_some() {
+                            let csharp_visibility_text = csharp_visibility
+                                .unwrap()
+                                .utf8_text(source.as_bytes())
+                                .unwrap();
+                            if csharp_visibility_text == "private" {
+                                continue;
+                            }
+                        }
+                    }
+
                     let mut params_node = node
                         .child_by_field_name("parameters")
                         .or_else(|| find_descendant_by_type(&node, "parameter_list"));
@@ -494,12 +628,26 @@ fn extract_definitions(language: &str, source: &str) -> Result<Vec<Definition>, 
                         .unwrap_or("()");
                     let mut return_type_node = match language {
                         "cpp" => node.child_by_field_name("type"),
+                        "csharp" => node.child_by_field_name("returns"),
                         _ => node.child_by_field_name("return_type"),
                     };
                     if language == "cpp" {
                         let class_specifier_node = find_ancestor_by_type(&node, "class_specifier");
                         let type_identifier_node =
                             class_specifier_node.and_then(|n| n.child_by_field_name("name"));
+
+                        if let Some(type_identifier_node) = type_identifier_node {
+                            let type_identifier_text =
+                                type_identifier_node.utf8_text(source.as_bytes()).unwrap();
+                            if name == type_identifier_text {
+                                return_type_node = Some(type_identifier_node);
+                            }
+                        }
+                    }
+                    if language == "csharp" {
+                        let type_specifier_node = csharp_find_parent_type_node(&node);
+                        let type_identifier_node =
+                            type_specifier_node.and_then(|n| n.child_by_field_name("name"));
 
                         if let Some(type_identifier_node) = type_identifier_node {
                             let type_identifier_text =
@@ -542,6 +690,15 @@ fn extract_definitions(language: &str, source: &str) -> Result<Vec<Definition>, 
                             .and_then(|n| n.utf8_text(source.as_bytes()).ok())
                             .unwrap_or("")
                             .to_string()
+                    } else if language == "csharp" {
+                        csharp_find_parent_type_node(&node)
+                            .and_then(|n| n.child_by_field_name("name"))
+                            .and_then(|n| n.utf8_text(source.as_bytes()).ok())
+                            .unwrap_or("")
+                            .to_string()
+                    } else if language == "ruby" {
+                        ruby_find_parent_module_declaration_name(&node, source.as_bytes())
+                            .unwrap_or_default()
                     } else if let Some(impl_item) = impl_item_node {
                         let impl_type_node = impl_item.child_by_field_name("type");
                         impl_type_node
@@ -568,9 +725,17 @@ fn extract_definitions(language: &str, source: &str) -> Result<Vec<Definition>, 
 
                     let accessibility_modifier_node =
                         find_descendant_by_type(&node, "accessibility_modifier");
-                    let accessibility_modifier = accessibility_modifier_node
-                        .map(|n| n.utf8_text(source.as_bytes()).unwrap())
-                        .unwrap_or("");
+                    let accessibility_modifier = if language == "ruby" {
+                        if ruby_method_is_private(&node, source.as_bytes()) {
+                            "private"
+                        } else {
+                            ""
+                        }
+                    } else {
+                        accessibility_modifier_node
+                            .map(|n| n.utf8_text(source.as_bytes()).unwrap())
+                            .unwrap_or("")
+                    };
 
                     let func = Func {
                         name: name.to_string(),
@@ -598,12 +763,17 @@ fn extract_definitions(language: &str, source: &str) -> Result<Vec<Definition>, 
                         .map(|n| n.utf8_text(source.as_bytes()).unwrap())
                         .unwrap_or("");
                     let value_type = get_node_type(&node, source.as_bytes());
-                    let class_name = get_closest_ancestor_name(&node, source);
-                    if !class_name.is_empty()
-                        && language == "go"
-                        && !is_first_letter_uppercase(&class_name)
-                    {
-                        continue;
+                    let mut class_name = get_closest_ancestor_name(&node, source);
+                    if !class_name.is_empty() {
+                        if language == "ruby" {
+                            if let Some(namespaced_name) =
+                                ruby_find_parent_module_declaration_name(&node, source.as_bytes())
+                            {
+                                class_name = namespaced_name;
+                            }
+                        } else if language == "go" && !is_first_letter_uppercase(&class_name) {
+                            continue;
+                        }
                     }
                     if class_name.is_empty() {
                         continue;
@@ -645,6 +815,21 @@ fn extract_definitions(language: &str, source: &str) -> Result<Vec<Definition>, 
                             .unwrap_or("")
                             .to_string();
                     }
+
+                    if language == "csharp" {
+                        let csharp_visibility = find_descendant_by_type(&node, "modifier");
+                        if csharp_visibility.is_none() {
+                            continue;
+                        }
+                        let csharp_visibility_text = csharp_visibility
+                            .unwrap()
+                            .utf8_text(source.as_bytes())
+                            .unwrap();
+                        if csharp_visibility_text == "private" {
+                            continue;
+                        }
+                    }
+
                     if language == "zig" {
                         class_name =
                             zig_find_parent_variable_declaration_name(&node, source.as_bytes())
@@ -961,6 +1146,7 @@ fn stringify_definitions(definitions: &Vec<Definition>) -> String {
     for definition in definitions {
         match definition {
             Definition::Class(class) => res = format!("{res}{}", stringify_class(class)),
+            Definition::Module(module) => res = format!("{res}{}", stringify_class(module)),
             Definition::Enum(enum_def) => res = format!("{res}{}", stringify_enum(enum_def)),
             Definition::Union(union_def) => res = format!("{res}{}", stringify_union(union_def)),
             Definition::Func(func) => res = format!("{res}{}", stringify_function(func)),
@@ -1338,7 +1524,62 @@ mod tests {
         let stringified = stringify_definitions(&definitions);
         println!("{stringified}");
         // FIXME:
-        let expected = "var test_var;func test_func(a, b) -> void;";
+        let expected = "var test_var;func test_func(a, b) -> void;class InnerClassInFunc{func initialize(a, b) -> void;func test_method(a, b) -> void;};class TestClass{func initialize(a, b) -> void;func test_method(a, b) -> void;};";
+        assert_eq!(stringified, expected);
+    }
+
+    #[test]
+    fn test_ruby2() {
+        let source = r#"
+        # frozen_string_literal: true
+
+        require('jwt')
+
+        top_level_var = 1
+
+        def top_level_func
+          inner_var_in_func = 2
+        end
+
+        module A
+          module B
+            @module_var = :foo
+
+            def module_method
+              @module_var
+            end
+
+            class C < Base
+              TEST_CONST = 1
+              @class_var = :bar
+              attr_accessor :a, :b
+
+              def initialize(a, b)
+                @a = a
+                @b = b
+                super
+              end
+
+              def bar
+                inner_var_in_method = 1
+                true
+              end
+
+              private
+
+              def baz(request, params)
+                auth_header = request.headers['Authorization']
+                parts = auth_header.try(:split, /\s+/)
+                JWT.decode(parts.last)
+              end
+            end
+          end
+        end
+        "#;
+        let definitions = extract_definitions("ruby", source).unwrap();
+        let stringified = stringify_definitions(&definitions);
+        println!("{stringified}");
+        let expected = "var top_level_var;func top_level_func() -> void;module A{};module A::B{func module_method() -> void;var @module_var;};class A::B::C{func initialize(a, b) -> void;func bar() -> void;private func baz(request, params) -> void;var TEST_CONST;var @class_var;};";
         assert_eq!(stringified, expected);
     }
 
@@ -1504,6 +1745,60 @@ mod tests {
         println!("{stringified}");
         let expected =
             "module AnotherModule{func another_func();};module TestModule{func test_func(a, b);};";
+        assert_eq!(stringified, expected);
+    }
+
+    #[test]
+    fn test_csharp() {
+        let source = r#"
+      using System;
+
+      namespace TestNamespace;
+
+      public class TestClass(TestDependency m)
+      {
+
+        private int PrivateTestProperty { get; set; }
+
+        private int _privateTestField;
+
+        public int TestProperty { get; set; }
+
+        public string TestField;
+
+        public TestClass()
+        {
+          TestProperty = 0;
+        }
+
+
+        public void TestMethod(int a, int b)
+        {
+          var innerVarInMethod = 1;
+          return a + b;
+        }
+
+        public int TestMethod(int a, int b, int c) => a + b + c;
+
+        private void PrivateMethod()
+        {
+          return;
+        }
+
+        public class MyInnerClass(InnerClassDependency m) {}
+
+        public record MyInnerRecord(int a);
+      }
+
+      public record TestRecord(int a, int b);
+
+      public enum TestEnum { Value1, Value2 }
+      "#;
+
+        let definitions = extract_definitions("csharp", source).unwrap();
+        let stringified = stringify_definitions(&definitions);
+        println!("{stringified}");
+        let expected = "class MyInnerClass{func MyInnerClass(InnerClassDependency m) -> MyInnerClass;};class MyInnerRecord{func MyInnerRecord(int a) -> MyInnerRecord;};class TestClass{func TestClass(TestDependency m) -> TestClass;func TestClass() -> TestClass;func TestMethod(int a, int b) -> void;func TestMethod(int a, int b, int c) -> int;var TestProperty:int;var TestField:string;};class TestRecord{func TestRecord(int a, int b) -> TestRecord;};enum TestEnum{Value1;Value2;};";
         assert_eq!(stringified, expected);
     }
 
