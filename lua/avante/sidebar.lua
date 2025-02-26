@@ -2837,7 +2837,7 @@ function Sidebar:create_input_container(opts)
 
   -- 在 input buffer 创建后添加映射
   if vim.fn.has('mac') == 1 then
-    vim.api.nvim_buf_set_keymap(self.input.bufnr, 'i', '<D-v>', 
+    vim.api.nvim_buf_set_keymap(self.input_container.bufnr, 'i', '<D-v>', 
       [[<Cmd>lua require('avante.clipboard').paste_image()<CR>]], 
       { noremap = true, silent = false })
   end
