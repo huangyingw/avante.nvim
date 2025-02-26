@@ -439,10 +439,9 @@ local spinner_chars = {
   "⢰",
   "⣰",
   "⢴",
-  "⢲",
   "⢱",
   "⢸",
-  "⣸",
+  "⣹",
   "⢼",
   "⢺",
   "⢹",
@@ -1748,7 +1747,7 @@ function Sidebar:on_mount(opts)
   })
 
   self:render_result()
-  self:render_input(opts.ask)
+  self:render_input(opts)
   self:render_selected_code()
 
   local filetype = api.nvim_get_option_value("filetype", { buf = self.code.bufnr })
@@ -1889,6 +1888,8 @@ function Sidebar:initialize()
 
   self.file_selector:reset()
   self.file_selector:add_selected_file(filepath)
+
+  self:refresh_winids()
 
   return self
 end
@@ -2833,6 +2834,13 @@ function Sidebar:create_input_container(opts)
       if ev.data and ev.data.request then handle_submit(ev.data.request) end
     end,
   })
+
+  -- 在 input buffer 创建后添加映射
+  if vim.fn.has('mac') == 1 then
+    vim.api.nvim_buf_set_keymap(self.input.bufnr, 'i', '<D-v>', 
+      [[<Cmd>lua require('avante.clipboard').paste_image()<CR>]], 
+      { noremap = true, silent = false })
+  end
 
   self:refresh_winids()
 end

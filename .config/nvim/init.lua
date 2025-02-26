@@ -231,3 +231,33 @@ vim.api.nvim_create_autocmd("FileType", {
     vim.api.nvim_win_set_width(0, vim.o.columns)
   end
 })
+
+-- macOS 专用配置
+if vim.fn.has('mac') == 1 then
+  -- 添加一个测试映射来确认 Cmd 键是否被识别
+  vim.api.nvim_set_keymap('i', '<D-s>',
+    [[<Cmd>lua print("Cmd-T was pressed!")<CR>]],
+    { noremap = true, silent = false })
+
+  -- 修改图片粘贴映射，添加调试输出
+  vim.api.nvim_set_keymap('i', '<D-v>',
+    [[<Cmd>lua print("Cmd-V triggered"); if vim.bo.filetype == 'AvanteInput' then local ok, res = pcall(require('avante.clipboard').paste_image); print("Paste result:", ok, res) end<CR>]],
+    { noremap = true, silent = false })
+
+  -- 为所有新创建的 buffer 添加映射
+  vim.api.nvim_create_autocmd("BufEnter", {
+    pattern = "*",
+    callback = function()
+      local bufnr = vim.api.nvim_get_current_buf()
+      -- 为特定 buffer 设置映射
+      vim.api.nvim_buf_set_keymap(bufnr, 'i', '<D-v>', 
+        [[<Cmd>lua print("Buffer-specific Cmd-V triggered"); if vim.bo.filetype == 'AvanteInput' then require('avante.clipboard').paste_image() end<CR>]], 
+        { noremap = true, silent = false })
+    end
+  })
+end
+
+-- 添加一个普通的按键映射用于测试
+vim.api.nvim_set_keymap('i', '<C-p>',
+  [[<Cmd>lua print("Ctrl-P works!"); if vim.bo.filetype == 'AvanteInput' then require('avante.clipboard').paste_image() end<CR>]],
+  { noremap = true, silent = false })
