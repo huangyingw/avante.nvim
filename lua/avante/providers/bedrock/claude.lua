@@ -16,7 +16,7 @@ M.role_map = {
   assistant = "assistant",
 }
 
-M.parse_messages = function(opts)
+function M.parse_messages(opts)
   ---@type AvanteBedrockClaudeMessage[]
   local messages = {}
 
@@ -32,38 +32,42 @@ M.parse_messages = function(opts)
     })
   end
 
-  if opts.tool_use then
-    local msg = {
-      role = "assistant",
-      content = {},
-    }
-    if opts.response_content then
-      msg.content[#msg.content + 1] = {
-        type = "text",
-        text = opts.response_content,
-      }
-    end
-    msg.content[#msg.content + 1] = {
-      type = "tool_use",
-      id = opts.tool_use.id,
-      name = opts.tool_use.name,
-      input = vim.json.decode(opts.tool_use.input_json),
-    }
-    messages[#messages + 1] = msg
-  end
+  if opts.tool_histories then
+    for _, tool_history in ipairs(opts.tool_histories) do
+      if tool_history.tool_use then
+        local msg = {
+          role = "assistant",
+          content = {},
+        }
+        if tool_history.tool_use.response_content then
+          msg.content[#msg.content + 1] = {
+            type = "text",
+            text = tool_history.tool_use.response_content,
+          }
+        end
+        msg.content[#msg.content + 1] = {
+          type = "tool_use",
+          id = tool_history.tool_use.id,
+          name = tool_history.tool_use.name,
+          input = vim.json.decode(tool_history.tool_use.input_json),
+        }
+        messages[#messages + 1] = msg
+      end
 
-  if opts.tool_result then
-    messages[#messages + 1] = {
-      role = "user",
-      content = {
-        {
-          type = "tool_result",
-          tool_use_id = opts.tool_result.tool_use_id,
-          content = opts.tool_result.content,
-          is_error = opts.tool_result.is_error,
-        },
-      },
-    }
+      if tool_history.tool_result then
+        messages[#messages + 1] = {
+          role = "user",
+          content = {
+            {
+              type = "tool_result",
+              tool_use_id = tool_history.tool_result.tool_use_id,
+              content = tool_history.tool_result.content,
+              is_error = tool_history.tool_result.is_error,
+            },
+          },
+        }
+      end
+    end
   end
 
   return messages
@@ -74,7 +78,7 @@ M.parse_response = Claude.parse_response
 ---@param prompt_opts AvantePromptOptions
 ---@param body_opts table
 ---@return table
-M.build_bedrock_payload = function(prompt_opts, body_opts)
+function M.build_bedrock_payload(prompt_opts, body_opts)
   local system_prompt = prompt_opts.system_prompt or ""
   local messages = M.parse_messages(prompt_opts)
   local max_tokens = body_opts.max_tokens or 2000

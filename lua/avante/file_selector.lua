@@ -15,6 +15,8 @@ local FileSelector = {}
 
 ---@alias FileSelectorHandler fun(self: FileSelector, on_select: fun(filepaths: string[] | nil)): nil
 
+local function has_scheme(path) return path:find("^%w+://") ~= nil end
+
 function FileSelector:process_directory(absolute_path, project_root)
   local files = scan.scan_dir(absolute_path, {
     hidden = false,
@@ -58,7 +60,7 @@ end
 
 local function get_project_filepaths()
   local project_root = Utils.get_project_root()
-  local files = Utils.scan_directory_respect_gitignore({ directory = project_root, add_dirs = true })
+  local files = Utils.scan_directory({ directory = project_root, add_dirs = true })
   files = vim.iter(files):map(function(filepath) return Path:new(filepath):make_relative(project_root) end):totable()
 
   return vim.tbl_map(function(path)
@@ -87,7 +89,8 @@ end
 function FileSelector:add_selected_file(filepath)
   if not filepath or filepath == "" then return end
 
-  local absolute_path = Path:new(Utils.get_project_root()):joinpath(filepath):absolute()
+  local absolute_path = filepath:sub(1, 1) == "/" and filepath
+    or Path:new(Utils.get_project_root()):joinpath(filepath):absolute()
   local stat = vim.loop.fs_stat(absolute_path)
 
   if stat and stat.type == "directory" then
@@ -108,7 +111,7 @@ function FileSelector:add_current_buffer()
   local filepath = vim.api.nvim_buf_get_name(current_buf)
 
   -- Only process if it's a real file buffer
-  if filepath and filepath ~= "" and not vim.startswith(filepath, "avante://") then
+  if filepath and filepath ~= "" and not has_scheme(filepath) then
     local relative_path = require("avante.utils").relative_path(filepath)
 
     -- Check if file is already in list
@@ -166,6 +169,15 @@ end
 function FileSelector:open() self:show_select_ui() end
 
 function FileSelector:get_filepaths()
+  if type(Config.file_selector.provider_opts.get_filepaths) == "function" then
+    ---@type avante.file_selector.opts.IGetFilepathsParams
+    local params = {
+      cwd = Utils.get_project_root(),
+      selected_filepaths = self.selected_filepaths,
+    }
+    return Config.file_selector.provider_opts.get_filepaths(params)
+  end
+
   local filepaths = get_project_filepaths()
 
   table.sort(filepaths, function(a, b)
@@ -199,7 +211,7 @@ function FileSelector:fzf_ui(handler)
 
   local filepaths = self:get_filepaths()
 
-  local close_action = function() handler(nil) end
+  local function close_action() handler(nil) end
   fzf_lua.fzf_exec(
     filepaths,
     vim.tbl_deep_extend("force", {
@@ -227,18 +239,26 @@ end
 
 function FileSelector:mini_pick_ui(handler)
   -- luacheck: globals MiniPick
+  ---@diagnostic disable-next-line: undefined-field
   if not _G.MiniPick then
     Utils.error("mini.pick is not set up. Please install and set up mini.pick to use it as a file selector.")
     return
   end
-  local choose = function(item) handler(type(item) == "string" and { item } or item) end
-  local choose_marked = function(items_marked) handler(items_marked) end
+  local function choose(item) handler(type(item) == "string" and { item } or item) end
+  local function choose_marked(items_marked) handler(items_marked) end
   local source = { choose = choose, choose_marked = choose_marked }
+  ---@diagnostic disable-next-line: undefined-global
   local result = MiniPick.builtin.files(nil, { source = source })
   if result == nil then handler(nil) end
 end
 
 function FileSelector:snacks_picker_ui(handler)
+  ---@diagnostic disable-next-line: undefined-field
+  if not _G.Snacks then
+    Utils.error("Snacks is not set up. Please install and set up Snacks to use it as a file selector.")
+    return
+  end
+  ---@diagnostic disable-next-line: undefined-global
   Snacks.picker.files({
     exclude = self.selected_filepaths,
     confirm = function(picker)
@@ -367,15 +387,15 @@ end
 ---@return { path: string, content: string, file_type: string }[]
 function FileSelector:get_selected_files_contents()
   local contents = {}
-  for _, file_path in ipairs(self.selected_filepaths) do
-    local lines, error = Utils.read_file_from_buf_or_disk(file_path)
+  for _, filepath in ipairs(self.selected_filepaths) do
+    local lines, error = Utils.read_file_from_buf_or_disk(filepath)
     lines = lines or {}
-    local filetype = Utils.get_filetype(file_path)
+    local filetype = Utils.get_filetype(filepath)
     if error ~= nil then
       Utils.error("error reading file: " .. error)
     else
       local content = table.concat(lines, "\n")
-      table.insert(contents, { path = file_path, content = content, file_type = filetype })
+      table.insert(contents, { path = filepath, content = content, file_type = filetype })
     end
   end
   return contents
@@ -392,6 +412,20 @@ function FileSelector:add_quickfix_files()
     :totable()
   for _, filepath in ipairs(quickfix_files) do
     self:add_selected_file(filepath)
+  end
+end
+
+---@return nil
+function FileSelector:add_buffer_files()
+  local buffers = vim.api.nvim_list_bufs()
+  for _, bufnr in ipairs(buffers) do
+    if vim.api.nvim_buf_is_loaded(bufnr) then
+      local filepath = vim.api.nvim_buf_get_name(bufnr)
+      if filepath and filepath ~= "" and not has_scheme(filepath) then
+        local relative_path = Utils.relative_path(filepath)
+        self:add_selected_file(relative_path)
+      end
+    end
   end
 end
 

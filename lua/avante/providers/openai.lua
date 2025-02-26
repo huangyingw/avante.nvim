@@ -3,64 +3,6 @@ local Config = require("avante.config")
 local Clipboard = require("avante.clipboard")
 local P = require("avante.providers")
 
----@class OpenAIChatResponse
----@field id string
----@field object "chat.completion" | "chat.completion.chunk"
----@field created integer
----@field model string
----@field system_fingerprint string
----@field choices? OpenAIResponseChoice[] | OpenAIResponseChoiceComplete[]
----@field usage {prompt_tokens: integer, completion_tokens: integer, total_tokens: integer}
----
----@class OpenAIResponseChoice
----@field index integer
----@field delta OpenAIMessage
----@field logprobs? integer
----@field finish_reason? "stop" | "length"
----
----@class OpenAIResponseChoiceComplete
----@field message OpenAIMessage
----@field finish_reason "stop" | "length" | "eos_token"
----@field index integer
----@field logprobs integer
----
----@class OpenAIMessageToolCallFunction
----@field name string
----@field arguments string
----
----@class OpenAIMessageToolCall
----@field index integer
----@field id string
----@field type "function"
----@field function OpenAIMessageToolCallFunction
----
----@class OpenAIMessage
----@field role? "user" | "system" | "assistant"
----@field content? string
----@field reasoning_content? string
----@field reasoning? string
----@field tool_calls? OpenAIMessageToolCall[]
----
----@class AvanteOpenAITool
----@field type "function"
----@field function AvanteOpenAIToolFunction
----
----@class AvanteOpenAIToolFunction
----@field name string
----@field description string
----@field parameters AvanteOpenAIToolFunctionParameters
----@field strict boolean
----
----@class AvanteOpenAIToolFunctionParameters
----@field type string
----@field properties table<string, AvanteOpenAIToolFunctionParameterProperty>
----@field required string[]
----@field additionalProperties boolean
----
----@class AvanteOpenAIToolFunctionParameterProperty
----@field type string
----@field description string
-
 ---@class AvanteProviderFunctor
 local M = {}
 
@@ -101,10 +43,10 @@ function M.transform_tool(tool)
   return res
 end
 
-M.is_openrouter = function(url) return url:match("^https://openrouter%.ai/") end
+function M.is_openrouter(url) return url:match("^https://openrouter%.ai/") end
 
 ---@param opts AvantePromptOptions
-M.get_user_message = function(opts)
+function M.get_user_message(opts)
   vim.deprecate("get_user_message", "parse_messages", "0.1.0", "avante.nvim")
   return table.concat(
     vim
@@ -119,9 +61,9 @@ M.get_user_message = function(opts)
   )
 end
 
-M.is_o_series_model = function(model) return model and string.match(model, "^o%d+") ~= nil end
+function M.is_o_series_model(model) return model and string.match(model, "^o%d+") ~= nil end
 
-M.parse_messages = function(opts)
+function M.parse_messages(opts)
   local messages = {}
   local provider = P[Config.provider]
   local base, _ = P.parse_config(provider)
@@ -195,17 +137,18 @@ M.parse_messages = function(opts)
   return final_messages
 end
 
-M.parse_response = function(ctx, data_stream, _, opts)
+function M.parse_response(ctx, data_stream, _, opts)
   if data_stream:match('"%[DONE%]":') then
     opts.on_stop({ reason = "complete" })
     return
   end
   if data_stream:match('"delta":') then
-    ---@type OpenAIChatResponse
+    ---@type AvanteOpenAIChatResponse
     local jsn = vim.json.decode(data_stream)
     if jsn.choices and jsn.choices[1] then
       local choice = jsn.choices[1]
       if choice.finish_reason == "stop" or choice.finish_reason == "eos_token" then
+        if choice.delta.content and choice.delta.content ~= vim.NIL then opts.on_chunk(choice.delta.content) end
         opts.on_stop({ reason = "complete" })
       elseif choice.finish_reason == "tool_calls" then
         opts.on_stop({
@@ -227,7 +170,7 @@ M.parse_response = function(ctx, data_stream, _, opts)
         end
         ctx.last_think_content = choice.delta.reasoning
         opts.on_chunk(choice.delta.reasoning)
-      elseif choice.delta.tool_calls then
+      elseif choice.delta.tool_calls and choice.delta.tool_calls ~= vim.NIL then
         local tool_call = choice.delta.tool_calls[1]
         if not ctx.tool_use_list then ctx.tool_use_list = {} end
         if not ctx.tool_use_list[tool_call.index + 1] then
@@ -262,8 +205,8 @@ M.parse_response = function(ctx, data_stream, _, opts)
   end
 end
 
-M.parse_response_without_stream = function(data, _, opts)
-  ---@type OpenAIChatResponse
+function M.parse_response_without_stream(data, _, opts)
+  ---@type AvanteOpenAIChatResponse
   local json = vim.json.decode(data)
   if json.choices and json.choices[1] then
     local choice = json.choices[1]
@@ -274,7 +217,7 @@ M.parse_response_without_stream = function(data, _, opts)
   end
 end
 
-M.parse_curl_args = function(provider, prompt_opts)
+function M.parse_curl_args(provider, prompt_opts)
   local provider_conf, request_body = P.parse_config(provider)
   local disable_tools = provider_conf.disable_tools or false
 

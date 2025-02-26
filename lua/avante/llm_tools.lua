@@ -2,6 +2,9 @@ local curl = require("plenary.curl")
 local Utils = require("avante.utils")
 local Path = require("plenary.path")
 local Config = require("avante.config")
+local RagService = require("avante.rag_service")
+
+---@class AvanteRagService
 local M = {}
 
 ---@param rel_path string
@@ -9,7 +12,9 @@ local M = {}
 local function get_abs_path(rel_path)
   if Path:new(rel_path):is_absolute() then return rel_path end
   local project_root = Utils.get_project_root()
-  return Path:new(project_root):joinpath(rel_path):absolute()
+  local p = tostring(Path:new(project_root):joinpath(rel_path):absolute())
+  if p:sub(-2) == "/." then p = p:sub(1, -3) end
+  return p
 end
 
 function M.confirm(msg)
@@ -28,19 +33,16 @@ local function has_permission_to_access(abs_path)
   return not Utils.is_ignored(abs_path, gitignore_patterns, gitignore_negate_patterns)
 end
 
----@param opts { rel_path: string, depth?: integer }
----@param on_log? fun(log: string): nil
----@return string files
----@return string|nil error
+---@type AvanteLLMToolFunc<{ rel_path: string, max_depth?: integer }>
 function M.list_files(opts, on_log)
   local abs_path = get_abs_path(opts.rel_path)
   if not has_permission_to_access(abs_path) then return "", "No permission to access path: " .. abs_path end
   if on_log then on_log("path: " .. abs_path) end
-  if on_log then on_log("depth: " .. tostring(opts.depth)) end
-  local files = Utils.scan_directory_respect_gitignore({
+  if on_log then on_log("max depth: " .. tostring(opts.max_depth)) end
+  local files = Utils.scan_directory({
     directory = abs_path,
     add_dirs = true,
-    depth = opts.depth,
+    max_depth = opts.max_depth,
   })
   local filepaths = {}
   for _, file in ipairs(files) do
@@ -50,16 +52,13 @@ function M.list_files(opts, on_log)
   return vim.json.encode(filepaths), nil
 end
 
----@param opts { rel_path: string, keyword: string }
----@param on_log? fun(log: string): nil
----@return string files
----@return string|nil error
+---@type AvanteLLMToolFunc<{ rel_path: string, keyword: string }>
 function M.search_files(opts, on_log)
   local abs_path = get_abs_path(opts.rel_path)
   if not has_permission_to_access(abs_path) then return "", "No permission to access path: " .. abs_path end
   if on_log then on_log("path: " .. abs_path) end
   if on_log then on_log("keyword: " .. opts.keyword) end
-  local files = Utils.scan_directory_respect_gitignore({
+  local files = Utils.scan_directory({
     directory = abs_path,
   })
   local filepaths = {}
@@ -69,11 +68,8 @@ function M.search_files(opts, on_log)
   return vim.json.encode(filepaths), nil
 end
 
----@param opts { rel_path: string, keyword: string }
----@param on_log? fun(log: string): nil
----@return string result
----@return string|nil error
-function M.search(opts, on_log)
+---@type AvanteLLMToolFunc<{ rel_path: string, keyword: string }>
+function M.search_keyword(opts, on_log)
   local abs_path = get_abs_path(opts.rel_path)
   if not has_permission_to_access(abs_path) then return "", "No permission to access path: " .. abs_path end
   if not Path:new(abs_path):exists() then return "", "No such file or directory: " .. abs_path end
@@ -108,10 +104,7 @@ function M.search(opts, on_log)
   return vim.json.encode(filepaths), nil
 end
 
----@param opts { rel_path: string }
----@param on_log? fun(log: string): nil
----@return string definitions
----@return string|nil error
+---@type AvanteLLMToolFunc<{ rel_path: string }>
 function M.read_file_toplevel_symbols(opts, on_log)
   local RepoMap = require("avante.repo_map")
   local abs_path = get_abs_path(opts.rel_path)
@@ -127,10 +120,7 @@ function M.read_file_toplevel_symbols(opts, on_log)
   return definitions, nil
 end
 
----@param opts { rel_path: string }
----@param on_log? fun(log: string): nil
----@return string content
----@return string|nil error
+---@type AvanteLLMToolFunc<{ rel_path: string }>
 function M.read_file(opts, on_log)
   local abs_path = get_abs_path(opts.rel_path)
   if not has_permission_to_access(abs_path) then return "", "No permission to access path: " .. abs_path end
@@ -142,10 +132,7 @@ function M.read_file(opts, on_log)
   return content, nil
 end
 
----@param opts { rel_path: string }
----@param on_log? fun(log: string): nil
----@return boolean success
----@return string|nil error
+---@type AvanteLLMToolFunc<{ rel_path: string }>
 function M.create_file(opts, on_log)
   local abs_path = get_abs_path(opts.rel_path)
   if not has_permission_to_access(abs_path) then return false, "No permission to access path: " .. abs_path end
@@ -163,10 +150,7 @@ function M.create_file(opts, on_log)
   return true, nil
 end
 
----@param opts { rel_path: string, new_rel_path: string }
----@param on_log? fun(log: string): nil
----@return boolean success
----@return string|nil error
+---@type AvanteLLMToolFunc<{ rel_path: string, new_rel_path: string }>
 function M.rename_file(opts, on_log)
   local abs_path = get_abs_path(opts.rel_path)
   if not has_permission_to_access(abs_path) then return false, "No permission to access path: " .. abs_path end
@@ -183,10 +167,7 @@ function M.rename_file(opts, on_log)
   return true, nil
 end
 
----@param opts { rel_path: string, new_rel_path: string }
----@param on_log? fun(log: string): nil
----@return boolean success
----@return string|nil error
+---@type AvanteLLMToolFunc<{ rel_path: string, new_rel_path: string }>
 function M.copy_file(opts, on_log)
   local abs_path = get_abs_path(opts.rel_path)
   if not has_permission_to_access(abs_path) then return false, "No permission to access path: " .. abs_path end
@@ -200,10 +181,7 @@ function M.copy_file(opts, on_log)
   return true, nil
 end
 
----@param opts { rel_path: string }
----@param on_log? fun(log: string): nil
----@return boolean success
----@return string|nil error
+---@type AvanteLLMToolFunc<{ rel_path: string }>
 function M.delete_file(opts, on_log)
   local abs_path = get_abs_path(opts.rel_path)
   if not has_permission_to_access(abs_path) then return false, "No permission to access path: " .. abs_path end
@@ -215,10 +193,7 @@ function M.delete_file(opts, on_log)
   return true, nil
 end
 
----@param opts { rel_path: string }
----@param on_log? fun(log: string): nil
----@return boolean success
----@return string|nil error
+---@type AvanteLLMToolFunc<{ rel_path: string }>
 function M.create_dir(opts, on_log)
   local abs_path = get_abs_path(opts.rel_path)
   if not has_permission_to_access(abs_path) then return false, "No permission to access path: " .. abs_path end
@@ -231,10 +206,7 @@ function M.create_dir(opts, on_log)
   return true, nil
 end
 
----@param opts { rel_path: string, new_rel_path: string }
----@param on_log? fun(log: string): nil
----@return boolean success
----@return string|nil error
+---@type AvanteLLMToolFunc<{ rel_path: string, new_rel_path: string }>
 function M.rename_dir(opts, on_log)
   local abs_path = get_abs_path(opts.rel_path)
   if not has_permission_to_access(abs_path) then return false, "No permission to access path: " .. abs_path end
@@ -251,10 +223,7 @@ function M.rename_dir(opts, on_log)
   return true, nil
 end
 
----@param opts { rel_path: string }
----@param on_log? fun(log: string): nil
----@return boolean success
----@return string|nil error
+---@type AvanteLLMToolFunc<{ rel_path: string }>
 function M.delete_dir(opts, on_log)
   local abs_path = get_abs_path(opts.rel_path)
   if not has_permission_to_access(abs_path) then return false, "No permission to access path: " .. abs_path end
@@ -268,11 +237,8 @@ function M.delete_dir(opts, on_log)
   return true, nil
 end
 
----@param opts { rel_path: string, command: string }
----@param on_log? fun(log: string): nil
----@return string|boolean result
----@return string|nil error
-function M.run_command(opts, on_log)
+---@type AvanteLLMToolFunc<{ rel_path: string, command: string }>
+function M.run_command(opts, on_log, on_complete)
   local abs_path = get_abs_path(opts.rel_path)
   if not has_permission_to_access(abs_path) then return false, "No permission to access path: " .. abs_path end
   if not Path:new(abs_path):exists() then return false, "Path not found: " .. abs_path end
@@ -285,19 +251,30 @@ function M.run_command(opts, on_log)
   ---change cwd to abs_path
   local old_cwd = vim.fn.getcwd()
   vim.fn.chdir(abs_path)
-  local res = Utils.shell_run(opts.command)
-  vim.fn.chdir(old_cwd)
-  if res.code ~= 0 then
-    if res.stdout then return false, "Error: " .. res.stdout .. "; Error code: " .. tostring(res.code) end
-    return false, "Error code: " .. tostring(res.code)
+  ---@param output string
+  ---@param exit_code integer
+  ---@return string | boolean | nil result
+  ---@return string | nil error
+  local function handle_result(output, exit_code)
+    vim.fn.chdir(old_cwd)
+    if exit_code ~= 0 then
+      if output then return false, "Error: " .. output .. "; Error code: " .. tostring(exit_code) end
+      return false, "Error code: " .. tostring(exit_code)
+    end
+    return output, nil
   end
-  return res.stdout, nil
+  if on_complete then
+    Utils.shell_run_async(opts.command, Config.run_command.shell_cmd, function(output, exit_code)
+      local result, err = handle_result(output, exit_code)
+      on_complete(result, err)
+    end)
+    return nil, nil
+  end
+  local res = Utils.shell_run(opts.command, Config.run_command.shell_cmd)
+  return handle_result(res.stdout, res.code)
 end
 
----@param opts { query: string }
----@param on_log? fun(log: string): nil
----@return string|nil result
----@return string|nil error
+---@type AvanteLLMToolFunc<{ query: string }>
 function M.web_search(opts, on_log)
   local provider_type = Config.web_search_engine.provider
   if provider_type == nil then return nil, "Search engine provider is not set" end
@@ -340,6 +317,23 @@ function M.web_search(opts, on_log)
     if resp.status ~= 200 then return nil, "Error: " .. resp.body end
     local jsn = vim.json.decode(resp.body)
     return search_engine.format_response_body(jsn)
+  elseif provider_type == "searchapi" then
+    local query_params = vim.tbl_deep_extend("force", {
+      api_key = api_key,
+      q = opts.query,
+    }, search_engine.extra_request_body)
+    local query_string = ""
+    for key, value in pairs(query_params) do
+      query_string = query_string .. key .. "=" .. vim.uri_encode(value) .. "&"
+    end
+    local resp = curl.get("https://searchapi.io/api/v1/search?" .. query_string, {
+      headers = {
+        ["Content-Type"] = "application/json",
+      },
+    })
+    if resp.status ~= 200 then return nil, "Error: " .. resp.body end
+    local jsn = vim.json.decode(resp.body)
+    return search_engine.format_response_body(jsn)
   elseif provider_type == "google" then
     local engine_id = os.getenv(search_engine.engine_id_name)
     if engine_id == nil or engine_id == "" then
@@ -362,13 +356,27 @@ function M.web_search(opts, on_log)
     if resp.status ~= 200 then return nil, "Error: " .. resp.body end
     local jsn = vim.json.decode(resp.body)
     return search_engine.format_response_body(jsn)
+  elseif provider_type == "kagi" then
+    local query_params = vim.tbl_deep_extend("force", {
+      q = opts.query,
+    }, search_engine.extra_request_body)
+    local query_string = ""
+    for key, value in pairs(query_params) do
+      query_string = query_string .. key .. "=" .. vim.uri_encode(value) .. "&"
+    end
+    local resp = curl.get("https://kagi.com/api/v0/search?" .. query_string, {
+      headers = {
+        ["Authorization"] = "Bot " .. api_key,
+        ["Content-Type"] = "application/json",
+      },
+    })
+    if resp.status ~= 200 then return nil, "Error: " .. resp.body end
+    local jsn = vim.json.decode(resp.body)
+    return search_engine.format_response_body(jsn)
   end
 end
 
----@param opts { url: string }
----@param on_log? fun(log: string): nil
----@return string|nil result
----@return string|nil error
+---@type AvanteLLMToolFunc<{ url: string }>
 function M.fetch(opts, on_log)
   if on_log then on_log("url: " .. opts.url) end
   local Html2Md = require("avante.html2md")
@@ -377,31 +385,322 @@ function M.fetch(opts, on_log)
   return res, nil
 end
 
----@class AvanteLLMTool
----@field name string
----@field description string
----@field func? fun(input: any): (string | nil, string | nil)
----@field param AvanteLLMToolParam
----@field returns AvanteLLMToolReturn[]
+---@type AvanteLLMToolFunc<{ scope?: string }>
+function M.git_diff(opts, on_log)
+  local git_cmd = vim.fn.exepath("git")
+  if git_cmd == "" then return nil, "Git command not found" end
+  local project_root = Utils.get_project_root()
+  if not project_root then return nil, "Not in a git repository" end
 
----@class AvanteLLMToolParam
----@field type string
----@field fields AvanteLLMToolParamField[]
+  -- Check if we're in a git repository
+  local git_dir = vim.fn.system("git rev-parse --git-dir"):gsub("\n", "")
+  if git_dir == "" then return nil, "Not a git repository" end
 
----@class AvanteLLMToolParamField
----@field name string
----@field description string
----@field type string
----@field optional? boolean
+  -- Get the diff
+  local scope = opts.scope or ""
+  local cmd = string.format("git diff --cached %s", scope)
+  if on_log then on_log("Running command: " .. cmd) end
+  local diff = vim.fn.system(cmd)
 
----@class AvanteLLMToolReturn
----@field name string
----@field description string
----@field type string
----@field optional? boolean
+  if diff == "" then
+    -- If there's no staged changes, get unstaged changes
+    cmd = string.format("git diff %s", scope)
+    if on_log then on_log("No staged changes. Running command: " .. cmd) end
+    diff = vim.fn.system(cmd)
+  end
+
+  if diff == "" then return nil, "No changes detected" end
+
+  return diff, nil
+end
+
+---@type AvanteLLMToolFunc<{ message: string, scope?: string }>
+function M.git_commit(opts, on_log)
+  local git_cmd = vim.fn.exepath("git")
+  if git_cmd == "" then return false, "Git command not found" end
+  local project_root = Utils.get_project_root()
+  if not project_root then return false, "Not in a git repository" end
+
+  -- Check if we're in a git repository
+  local git_dir = vim.fn.system("git rev-parse --git-dir"):gsub("\n", "")
+  if git_dir == "" then return false, "Not a git repository" end
+
+  -- First check if there are any changes to commit
+  local status = vim.fn.system("git status --porcelain")
+  if status == "" then return false, "No changes to commit" end
+
+  -- Get git user name and email
+  local git_user = vim.fn.system("git config user.name"):gsub("\n", "")
+  local git_email = vim.fn.system("git config user.email"):gsub("\n", "")
+
+  -- Check if GPG signing is available and configured
+  local has_gpg = false
+  local signing_key = vim.fn.system("git config --get user.signingkey"):gsub("\n", "")
+
+  if signing_key ~= "" then
+    -- Try to find gpg executable based on OS
+    local gpg_cmd
+    if vim.fn.has("win32") == 1 then
+      -- Check common Windows GPG paths
+      gpg_cmd = vim.fn.exepath("gpg.exe") ~= "" and vim.fn.exepath("gpg.exe") or vim.fn.exepath("gpg2.exe")
+    else
+      -- Unix-like systems (Linux/MacOS)
+      gpg_cmd = vim.fn.exepath("gpg") ~= "" and vim.fn.exepath("gpg") or vim.fn.exepath("gpg2")
+    end
+
+    if gpg_cmd ~= "" then
+      -- Verify GPG is working
+      local _ = vim.fn.system(string.format('"%s" --version', gpg_cmd))
+      has_gpg = vim.v.shell_error == 0
+    end
+  end
+
+  if on_log then on_log(string.format("GPG signing %s", has_gpg and "enabled" or "disabled")) end
+
+  -- Prepare commit message
+  local commit_msg_lines = {}
+  for line in opts.message:gmatch("[^\r\n]+") do
+    commit_msg_lines[#commit_msg_lines + 1] = line:gsub('"', '\\"')
+  end
+  if git_user ~= "" and git_email ~= "" then
+    commit_msg_lines[#commit_msg_lines + 1] = string.format("Signed-off-by: %s <%s>", git_user, git_email)
+  end
+
+  -- Construct full commit message for confirmation
+  local full_commit_msg = table.concat(commit_msg_lines, "\n")
+
+  -- Confirm with user
+  if not M.confirm("Are you sure you want to commit with message:\n" .. full_commit_msg) then
+    return false, "User canceled"
+  end
+
+  -- Stage changes if scope is provided
+  if opts.scope then
+    local stage_cmd = string.format("git add %s", opts.scope)
+    if on_log then on_log("Staging files: " .. stage_cmd) end
+    local stage_result = vim.fn.system(stage_cmd)
+    if vim.v.shell_error ~= 0 then return false, "Failed to stage files: " .. stage_result end
+  end
+
+  -- Construct git commit command
+  local cmd_parts = { "git", "commit" }
+  -- Only add -S flag if GPG is available
+  if has_gpg then table.insert(cmd_parts, "-S") end
+  for _, line in ipairs(commit_msg_lines) do
+    table.insert(cmd_parts, "-m")
+    table.insert(cmd_parts, '"' .. line .. '"')
+  end
+  local cmd = table.concat(cmd_parts, " ")
+
+  -- Execute git commit
+  if on_log then on_log("Running command: " .. cmd) end
+  local result = vim.fn.system(cmd)
+
+  if vim.v.shell_error ~= 0 then return false, "Failed to commit: " .. result end
+
+  return true, nil
+end
+
+---@type AvanteLLMToolFunc<{ query: string }>
+function M.rag_search(opts, on_log)
+  if not Config.rag_service.enabled then return nil, "Rag service is not enabled" end
+  if not opts.query then return nil, "No query provided" end
+  if on_log then on_log("query: " .. opts.query) end
+  local root = Utils.get_project_root()
+  local uri = "file://" .. root
+  if uri:sub(-1) ~= "/" then uri = uri .. "/" end
+  local resp, err = RagService.retrieve(uri, opts.query)
+  if err then return nil, err end
+  return vim.json.encode(resp), nil
+end
+
+---@type AvanteLLMToolFunc<{ code: string, rel_path: string, container_image?: string }>
+function M.python(opts, on_log)
+  local abs_path = get_abs_path(opts.rel_path)
+  if not has_permission_to_access(abs_path) then return nil, "No permission to access path: " .. abs_path end
+  if not Path:new(abs_path):exists() then return nil, "Path not found: " .. abs_path end
+  if on_log then on_log("cwd: " .. abs_path) end
+  if on_log then on_log("code:\n" .. opts.code) end
+  local container_image = opts.container_image or "python:3.11-slim-bookworm"
+  if
+    not M.confirm(
+      "Are you sure you want to run the following python code in the `"
+        .. container_image
+        .. "` container, in the directory: `"
+        .. abs_path
+        .. "`?\n"
+        .. opts.code
+    )
+  then
+    return nil, "User canceled"
+  end
+  if vim.fn.executable("docker") == 0 then return nil, "Python tool is not available to execute any code" end
+  ---change cwd to abs_path
+  local old_cwd = vim.fn.getcwd()
+
+  vim.fn.chdir(abs_path)
+  local output = vim
+    .system({
+      "docker",
+      "run",
+      "--rm",
+      "-v",
+      abs_path .. ":" .. abs_path,
+      "-w",
+      abs_path,
+      container_image,
+      "python",
+      "-c",
+      opts.code,
+    }, {
+      text = true,
+    })
+    :wait()
+
+  vim.fn.chdir(old_cwd)
+
+  if output.code ~= 0 then return nil, "Error: " .. (output.stderr or "Unknown error") end
+
+  Utils.debug("output", output.stdout)
+  return output.stdout, nil
+end
+
+---@return AvanteLLMTool[]
+function M.get_tools()
+  return vim
+    .iter(M._tools)
+    :filter(function(tool)
+      if tool.enabled == nil then
+        return true
+      else
+        return tool.enabled()
+      end
+    end)
+    :totable()
+end
 
 ---@type AvanteLLMTool[]
-M.tools = {
+M._tools = {
+  {
+    name = "rag_search",
+    enabled = function() return Config.rag_service.enabled and RagService.is_ready() end,
+    description = "Use Retrieval-Augmented Generation (RAG) to search for relevant information from an external knowledge base or documents. This tool retrieves relevant context from a large dataset and integrates it into the response generation process, improving accuracy and relevance. Use it when answering questions that require factual knowledge beyond what the model has been trained on.",
+    param = {
+      type = "table",
+      fields = {
+        {
+          name = "query",
+          description = "Query to search",
+          type = "string",
+        },
+      },
+    },
+    returns = {
+      {
+        name = "result",
+        description = "Result of the search",
+        type = "string",
+      },
+      {
+        name = "error",
+        description = "Error message if the search was not successful",
+        type = "string",
+        optional = true,
+      },
+    },
+  },
+  {
+    name = "python",
+    description = "Run python code",
+    param = {
+      type = "table",
+      fields = {
+        {
+          name = "code",
+          description = "Python code to run",
+          type = "string",
+        },
+        {
+          name = "rel_path",
+          description = "Relative path to the directory, as cwd",
+          type = "string",
+        },
+      },
+    },
+    returns = {
+      {
+        name = "result",
+        description = "Python output",
+        type = "string",
+      },
+      {
+        name = "error",
+        description = "Error message if the python code failed",
+        type = "string",
+        optional = true,
+      },
+    },
+  },
+  {
+    name = "git_diff",
+    description = "Get git diff for generating commit message",
+    param = {
+      type = "table",
+      fields = {
+        {
+          name = "scope",
+          description = "Scope for the git diff (e.g. specific files or directories)",
+          type = "string",
+        },
+      },
+    },
+    returns = {
+      {
+        name = "result",
+        description = "Git diff output to be used for generating commit message",
+        type = "string",
+      },
+      {
+        name = "error",
+        description = "Error message if the diff generation failed",
+        type = "string",
+        optional = true,
+      },
+    },
+  },
+  {
+    name = "git_commit",
+    description = "Commit changes with the given commit message",
+    param = {
+      type = "table",
+      fields = {
+        {
+          name = "message",
+          description = "Commit message to use",
+          type = "string",
+        },
+        {
+          name = "scope",
+          description = "Scope for staging files (e.g. specific files or directories)",
+          type = "string",
+          optional = true,
+        },
+      },
+    },
+    returns = {
+      {
+        name = "success",
+        description = "True if the commit was successful, false otherwise",
+        type = "boolean",
+      },
+      {
+        name = "error",
+        description = "Error message if the commit failed",
+        type = "string",
+        optional = true,
+      },
+    },
+  },
   {
     name = "list_files",
     description = "List files in a directory",
@@ -414,10 +713,9 @@ M.tools = {
           type = "string",
         },
         {
-          name = "depth",
-          description = "Depth of the directory",
+          name = "max_depth",
+          description = "Maximum depth of the directory",
           type = "integer",
-          optional = true,
         },
       },
     },
@@ -468,7 +766,7 @@ M.tools = {
     },
   },
   {
-    name = "search",
+    name = "search_keyword",
     description = "Search for a keyword in a directory",
     param = {
       type = "table",
@@ -816,26 +1114,47 @@ M.tools = {
 ---@param tools AvanteLLMTool[]
 ---@param tool_use AvanteLLMToolUse
 ---@param on_log? fun(tool_name: string, log: string): nil
+---@param on_complete? fun(result: string | nil, error: string | nil): nil
 ---@return string | nil result
 ---@return string | nil error
-function M.process_tool_use(tools, tool_use, on_log)
+function M.process_tool_use(tools, tool_use, on_log, on_complete)
   Utils.debug("use tool", tool_use.name, tool_use.input_json)
-  local tool = vim.iter(tools):find(function(tool) return tool.name == tool_use.name end)
+  ---@type AvanteLLMTool?
+  local tool = vim.iter(tools):find(function(tool) return tool.name == tool_use.name end) ---@param tool AvanteLLMTool
   if tool == nil then return end
   local input_json = vim.json.decode(tool_use.input_json)
   local func = tool.func or M[tool.name]
-  if on_log then on_log(tool_use.name, "running tool") end
-  local result, error = func(input_json, function(log)
-    if on_log then on_log(tool_use.name, log) end
-  end)
-  if on_log then on_log(tool_use.name, "tool finished") end
-  -- Utils.debug("result", result)
-  -- Utils.debug("error", error)
-  if error ~= nil then
-    if on_log then on_log(tool_use.name, "Error: " .. error) end
+  if on_log then on_log(tool.name, "running tool") end
+  ---@param result string | nil | boolean
+  ---@param err string | nil
+  local function handle_result(result, err)
+    if on_log then on_log(tool.name, "tool finished") end
+    -- Utils.debug("result", result)
+    -- Utils.debug("error", error)
+    if err ~= nil then
+      if on_log then on_log(tool.name, "Error: " .. err) end
+    end
+    local result_str ---@type string?
+    if type(result) == "string" then
+      result_str = result
+    elseif result ~= nil then
+      result_str = vim.json.encode(result)
+    end
+    return result_str, err
   end
-  if result ~= nil and type(result) ~= "string" then result = vim.json.encode(result) end
-  return result, error
+  local result, err = func(input_json, function(log)
+    if on_log then on_log(tool.name, log) end
+  end, function(result, err)
+    result, err = handle_result(result, err)
+    if on_complete == nil then
+      Utils.error("asynchronous tool " .. tool.name .. " result not handled")
+      return
+    end
+    on_complete(result, err)
+  end)
+  -- Result and error being nil means that the tool was executed asynchronously
+  if result == nil and err == nil and on_complete then return end
+  return handle_result(result, err)
 end
 
 ---@param tool_use AvanteLLMToolUse

@@ -1,6 +1,7 @@
 local api = vim.api
 
 local Config = require("avante.config")
+local Utils = require("avante.utils")
 local bit = require("bit")
 local rshift, band = bit.rshift, bit.band
 
@@ -16,15 +17,14 @@ local Highlights = {
   POPUP_HINT = { name = "AvantePopupHint", link = "NormalFloat" },
   INLINE_HINT = { name = "AvanteInlineHint", link = "Keyword" },
   TO_BE_DELETED = { name = "AvanteToBeDeleted", bg = "#ffcccc", strikethrough = true },
+  TO_BE_DELETED_WITHOUT_STRIKETHROUGH = { name = "AvanteToBeDeletedWOStrikethrough", bg = "#562C30" },
 }
 
 Highlights.conflict = {
-  CURRENT = { name = "AvanteConflictCurrent", bg = 4218238, bold = true }, -- #405d7e
-  CURRENT_LABEL = { name = "AvanteConflictCurrentLabel", link = "CURRENT", shade = 60 },
+  CURRENT = { name = "AvanteConflictCurrent", bg = "#562C30", bold = true },
+  CURRENT_LABEL = { name = "AvanteConflictCurrentLabel", shade_link = "AvanteConflictCurrent", shade = 30 },
   INCOMING = { name = "AvanteConflictIncoming", bg = 3229523, bold = true }, -- #314753
-  INCOMING_LABEL = { name = "AvanteConflictIncomingLabel", link = "INCOMING", shade = 60 },
-  ANCESTOR = { name = "AvanteConflictAncestor", bg = 6824314, bold = true }, -- #68217A
-  ANCESTOR_LABEL = { name = "AvanteConflictAncestorLabel", link = "ANCESTOR", shade = 60 },
+  INCOMING_LABEL = { name = "AvanteConflictIncomingLabel", shade_link = "AvanteConflictIncoming", shade = 30 },
 }
 
 --- helper
@@ -37,7 +37,7 @@ local function has_set_colors(hl_group)
   return next(hl) ~= nil
 end
 
-M.setup = function()
+function M.setup()
   if Config.behaviour.auto_set_highlight_group then
     vim
       .iter(Highlights)
@@ -56,41 +56,64 @@ M.setup = function()
       end)
   end
 
-  M.conflict_highlights()
+  M.setup_conflict_highlights()
 end
 
----@param opts? AvanteConflictHighlights
-M.conflict_highlights = function(opts)
-  opts = opts or Config.diff.highlights
+function M.setup_conflict_highlights()
+  local custom_hls = Config.highlights.diff
 
-  local get_highlights = function(key, hl)
-    local cl = api.nvim_get_hl(0, { name = opts[key:lower()] })
-    return cl ~= nil and cl or api.nvim_get_hl(0, { name = hl.name })
+  ---@return number | nil
+  local function get_bg(hl_name)
+    local hl = api.nvim_get_hl(0, { name = hl_name })
+    return hl.bg
   end
 
-  local get_default_colors = function(key, hl)
-    --- We will first check for user custom highlight. Then fallback to default name highlight.
-    return get_highlights(key, hl).bg or hl.bg
-  end
-
-  local get_shade = function(hl)
-    local color = get_default_colors(hl.link, Highlights.conflict[hl.link])
-    return H.shade_color(color, hl.shade)
+  local function get_bold(hl_name)
+    local hl = api.nvim_get_hl(0, { name = hl_name })
+    return hl.bold
   end
 
   vim.iter(Highlights.conflict):each(function(key, hl)
-    if not has_set_colors(hl.name) then
-      if hl.link ~= nil then
-        api.nvim_set_hl(0, hl.name, { bg = get_shade(hl), default = true })
-      else
-        local bold = get_highlights(key, hl).bold
-        api.nvim_set_hl(
-          0,
-          hl.name,
-          { bg = get_default_colors(key, hl), default = true, bold = bold ~= nil and bold or hl.bold }
-        )
-      end
+    --- set none shade linked highlights first
+    if hl.shade_link ~= nil and hl.shade ~= nil then return end
+
+    if has_set_colors(hl.name) then return end
+
+    local bg = hl.bg
+    local bold = hl.bold
+
+    local custom_hl_name = custom_hls[key:lower()]
+    if custom_hl_name ~= nil then
+      bg = get_bg(custom_hl_name) or hl.bg
+      bold = get_bold(custom_hl_name) or hl.bold
     end
+
+    api.nvim_set_hl(0, hl.name, { bg = bg, default = true, bold = bold })
+  end)
+
+  vim.iter(Highlights.conflict):each(function(key, hl)
+    --- only set shade linked highlights
+    if hl.shade_link == nil or hl.shade == nil then return end
+
+    if has_set_colors(hl.name) then return end
+
+    local bg
+    local bold = hl.bold
+
+    local custom_hl_name = custom_hls[key:lower()]
+    if custom_hl_name ~= nil then
+      bg = get_bg(custom_hl_name)
+      bold = get_bold(custom_hl_name) or hl.bold
+    else
+      local link_bg = get_bg(hl.shade_link)
+      if link_bg == nil then
+        Utils.warn(string.format("highlights %s don't have bg, use fallback", hl.shade_link))
+        link_bg = 3229523
+      end
+      bg = H.shade_color(link_bg, hl.shade)
+    end
+
+    api.nvim_set_hl(0, hl.name, { bg = bg, default = true, bold = bold })
   end)
 end
 
@@ -110,7 +133,7 @@ setmetatable(M, {
 ---
 ---@param rgb_24bit number 24-bit RGB value
 ---@return {r: integer, g: integer, b: integer} with keys 'r', 'g', 'b' in [0,255]
-H.decode_24bit_rgb = function(rgb_24bit)
+function H.decode_24bit_rgb(rgb_24bit)
   vim.validate({ rgb_24bit = { rgb_24bit, "n", true } })
   local r = band(rshift(rgb_24bit, 16), 255)
   local g = band(rshift(rgb_24bit, 8), 255)
@@ -120,7 +143,7 @@ end
 
 ---@param attr integer
 ---@param percent integer
-H.alter = function(attr, percent) return math.floor(attr * (100 + percent) / 100) end
+function H.alter(attr, percent) return math.floor(attr * (100 + percent) / 100) end
 
 ---@source https://stackoverflow.com/q/5560248
 ---@see https://stackoverflow.com/a/37797380
@@ -128,8 +151,8 @@ H.alter = function(attr, percent) return math.floor(attr * (100 + percent) / 100
 ---@param color number
 ---@param percent number
 ---@return string
-H.shade_color = function(color, percent)
-  percent = vim.opt.background:get() == "light" and percent / 10 or percent
+function H.shade_color(color, percent)
+  percent = vim.opt.background:get() == "light" and percent / 5 or percent
   local rgb = H.decode_24bit_rgb(color)
   if not rgb.r or not rgb.g or not rgb.b then return "NONE" end
   local r, g, b = H.alter(rgb.r, percent), H.alter(rgb.g, percent), H.alter(rgb.b, percent)

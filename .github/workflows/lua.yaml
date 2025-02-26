@@ -6,11 +6,13 @@ on:
       - main
     paths:
       - "**/*.lua"
+      - ".github/workflows/lua.yaml"
   pull_request:
     branches:
       - main
     paths:
       - "**/*.lua"
+      - ".github/workflows/lua.yaml"
 
 jobs:
   # reference from: https://github.com/nvim-lua/plenary.nvim/blob/2d9b06177a975543726ce5c73fca176cedbffe9d/.github/workflows/default.yml#L6C3-L43C20
@@ -74,3 +76,56 @@ jobs:
         uses: lunarmodules/luacheck@cc089e3f65acdd1ef8716cc73a3eca24a6b845e4 # ratchet:lunarmodules/luacheck@v1
         with:
           args: ./lua/
+
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        nvim_version: [ stable ]
+        luals_version: [ 3.13.6 ]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: ${{ matrix.nvim_version }}
+
+      - name: Install luals
+        run: |
+          mkdir -p luals
+          curl -L "https://github.com/LuaLS/lua-language-server/releases/download/${{ matrix.luals_version }}/lua-language-server-${{ matrix.luals_version }}-linux-x64.tar.gz" | tar zx --directory luals
+
+      - run: echo "luals/bin" >> "$GITHUB_PATH"
+
+      - name: Checkout dependencies
+        run: |
+          mkdir -p deps
+          DEPS=(
+            "folke/neodev.nvim"
+            "nvim-treesitter/nvim-treesitter"
+            "stevearc/dressing.nvim"
+            "nvim-lua/plenary.nvim"
+            "MunifTanjim/nui.nvim"
+            "echasnovski/mini.nvim"
+            "nvim-telescope/telescope.nvim"
+            "hrsh7th/nvim-cmp"
+            "ibhagwan/fzf-lua"
+            "nvim-tree/nvim-web-devicons"
+            "zbirenbaum/copilot.lua"
+            "Bilal2453/luvit-meta"
+            "folke/lazy.nvim"
+          )
+          for dep in "${DEPS[@]}"; do
+            repo_name=$(echo $dep | cut -d'/' -f2)
+            git clone --depth 1 "https://github.com/${dep}.git" "deps/${repo_name}"
+          done
+
+      - name: Typecheck
+        env:
+          VIMRUNTIME: /home/runner/nvim-${{ matrix.nvim_version }}/share/nvim/runtime
+          DEPS_PATH: /home/runner/work/avante.nvim/avante.nvim/deps/
+        run: |
+          make lua-typecheck

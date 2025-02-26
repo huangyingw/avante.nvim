@@ -2,6 +2,7 @@ local api = vim.api
 
 local Config = require("avante.config")
 local Utils = require("avante.utils")
+local Highlights = require("avante.highlights")
 
 local H = {}
 local M = {}
@@ -76,10 +77,10 @@ local name_map = {
   cursor = "cursor",
 }
 
-local CURRENT_HL = "AvanteConflictCurrent"
-local INCOMING_HL = "AvanteConflictIncoming"
-local CURRENT_LABEL_HL = "AvanteConflictCurrentLabel"
-local INCOMING_LABEL_HL = "AvanteConflictIncomingLabel"
+local CURRENT_HL = Highlights.CURRENT
+local INCOMING_HL = Highlights.INCOMING
+local CURRENT_LABEL_HL = Highlights.CURRENT_LABEL
+local INCOMING_LABEL_HL = Highlights.INCOMING_LABEL
 local PRIORITY = vim.highlight.priorities.user
 local NAMESPACE = api.nvim_create_namespace("avante-conflict")
 local KEYBINDING_NAMESPACE = api.nvim_create_namespace("avante-conflict-keybinding")
@@ -282,12 +283,12 @@ local function register_cursor_move_events(bufnr)
 
     local hint = string.format(
       "[<%s>: OURS, <%s>: THEIRS, <%s>: CURSOR, <%s>: ALL THEIRS, <%s>: PREV, <%s>: NEXT]",
-      Config.diff.mappings.ours,
-      Config.diff.mappings.theirs,
-      Config.diff.mappings.cursor,
-      Config.diff.mappings.all_theirs,
-      Config.diff.mappings.prev,
-      Config.diff.mappings.next
+      Config.mappings.diff.ours,
+      Config.mappings.diff.theirs,
+      Config.mappings.diff.cursor,
+      Config.mappings.diff.all_theirs,
+      Config.mappings.diff.prev,
+      Config.mappings.diff.next
     )
 
     show_keybinding_hint_extmark_id = api.nvim_buf_set_extmark(bufnr, KEYBINDING_NAMESPACE, lnum - 1, -1, {
@@ -350,30 +351,30 @@ end
 -----------------------------------------------------------------------------//
 
 ---@param bufnr integer given buffer id
-H.setup_buffer_mappings = function(bufnr)
+function H.setup_buffer_mappings(bufnr)
   ---@param desc string
   local function opts(desc) return { silent = true, buffer = bufnr, desc = "avante(conflict): " .. desc } end
 
-  vim.keymap.set({ "n", "v" }, Config.diff.mappings.ours, function() M.choose("ours") end, opts("choose ours"))
-  vim.keymap.set({ "n", "v" }, Config.diff.mappings.both, function() M.choose("both") end, opts("choose both"))
-  vim.keymap.set({ "n", "v" }, Config.diff.mappings.theirs, function() M.choose("theirs") end, opts("choose theirs"))
+  vim.keymap.set({ "n", "v" }, Config.mappings.diff.ours, function() M.choose("ours") end, opts("choose ours"))
+  vim.keymap.set({ "n", "v" }, Config.mappings.diff.both, function() M.choose("both") end, opts("choose both"))
+  vim.keymap.set({ "n", "v" }, Config.mappings.diff.theirs, function() M.choose("theirs") end, opts("choose theirs"))
   vim.keymap.set(
     { "n", "v" },
-    Config.diff.mappings.all_theirs,
+    Config.mappings.diff.all_theirs,
     function() M.choose("all_theirs") end,
     opts("choose all theirs")
   )
-  vim.keymap.set("n", Config.diff.mappings.cursor, function() M.choose("cursor") end, opts("choose under cursor"))
-  vim.keymap.set("n", Config.diff.mappings.prev, function() M.find_prev("ours") end, opts("previous conflict"))
-  vim.keymap.set("n", Config.diff.mappings.next, function() M.find_next("ours") end, opts("next conflict"))
+  vim.keymap.set("n", Config.mappings.diff.cursor, function() M.choose("cursor") end, opts("choose under cursor"))
+  vim.keymap.set("n", Config.mappings.diff.prev, function() M.find_prev("ours") end, opts("previous conflict"))
+  vim.keymap.set("n", Config.mappings.diff.next, function() M.find_next("ours") end, opts("next conflict"))
 
   vim.b[bufnr].avante_conflict_mappings_set = true
 end
 
 ---@param bufnr integer
-H.clear_buffer_mappings = function(bufnr)
+function H.clear_buffer_mappings(bufnr)
   if not bufnr or not vim.b[bufnr].avante_conflict_mappings_set then return end
-  for _, mapping in pairs(Config.diff.mappings) do
+  for _, mapping in pairs(Config.mappings.diff) do
     if vim.fn.hasmapto(mapping, "n") > 0 then api.nvim_buf_del_keymap(bufnr, "n", mapping) end
   end
   vim.b[bufnr].avante_conflict_mappings_set = false
@@ -381,7 +382,7 @@ H.clear_buffer_mappings = function(bufnr)
 end
 
 ---@param bufnr integer
-M.override_timeoutlen = function(bufnr)
+function M.override_timeoutlen(bufnr)
   if vim.b[bufnr].avante_original_timeoutlen then return end
   if Config.diff.override_timeoutlen > 0 then
     vim.b[bufnr].avante_original_timeoutlen = vim.o.timeoutlen
@@ -390,7 +391,7 @@ M.override_timeoutlen = function(bufnr)
 end
 
 ---@param bufnr integer
-M.restore_timeoutlen = function(bufnr)
+function M.restore_timeoutlen(bufnr)
   if vim.b[bufnr].avante_original_timeoutlen then
     vim.o.timeoutlen = vim.b[bufnr].avante_original_timeoutlen
     vim.b[bufnr].avante_original_timeoutlen = nil

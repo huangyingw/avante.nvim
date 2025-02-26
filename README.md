@@ -13,6 +13,9 @@
   <a href="https://github.com/yetone/avante.nvim/actions/workflows/rust.yaml" target="_blank">
     <img src="https://img.shields.io/github/actions/workflow/status/yetone/avante.nvim/rust.yaml?style=flat-square&logo=rust&logoColor=ffffff&label=Rust+CI&labelColor=BC826A&color=347D39&event=push" alt="Rust CI status" />
   </a>
+  <a href="https://github.com/yetone/avante.nvim/actions/workflows/python.yaml" target="_blank">
+    <img src="https://img.shields.io/github/actions/workflow/status/yetone/avante.nvim/python.yaml?style=flat-square&logo=python&logoColor=ffffff&label=Python+CI&labelColor=3672A5&color=347D39&event=push" alt="Python CI status" />
+  </a>
   <a href="https://discord.com/invite/wUuZz7VxXD" target="_blank">
     <img src="https://img.shields.io/discord/1302530866362323016?style=flat-square&logo=discord&label=Discord&logoColor=ffffff&labelColor=7376CF&color=268165" alt="Discord" />
   </a>
@@ -30,6 +33,12 @@
 https://github.com/user-attachments/assets/510e6270-b6cf-459d-9a2f-15b397d1fe53
 
 https://github.com/user-attachments/assets/86140bfd-08b4-483d-a887-1b701d9e37dd
+
+## Sponsorship
+
+If you like this project, please consider supporting me on Patreon, as it helps me to continue maintaining and improving it:
+
+[Sponsor me](https://patreon.com/yetone)
 
 ## Features
 
@@ -60,12 +69,14 @@ For building binary if you wish to build from source, then `cargo` is required. 
       timeout = 30000, -- timeout in milliseconds
       temperature = 0, -- adjust if needed
       max_tokens = 4096,
+      -- reasoning_effort = "high" -- only supported for reasoning models (o1, etc.)
     },
   },
   -- if you want to build from source then do `make BUILD_FROM_SOURCE=true`
   build = "make",
   -- build = "powershell -ExecutionPolicy Bypass -File Build.ps1 -BuildFromSource false" -- for windows
   dependencies = {
+    "nvim-treesitter/nvim-treesitter",
     "stevearc/dressing.nvim",
     "nvim-lua/plenary.nvim",
     "MunifTanjim/nui.nvim",
@@ -114,6 +125,7 @@ For building binary if you wish to build from source, then `cargo` is required. 
 ```vim
 
 " Deps
+Plug 'nvim-treesitter/nvim-treesitter'
 Plug 'stevearc/dressing.nvim'
 Plug 'nvim-lua/plenary.nvim'
 Plug 'MunifTanjim/nui.nvim'
@@ -128,7 +140,6 @@ Plug 'zbirenbaum/copilot.lua'
 " Yay, pass source=true if you want to build from source
 Plug 'yetone/avante.nvim', { 'branch': 'main', 'do': 'make' }
 autocmd! User avante.nvim lua << EOF
-require('avante_lib').load()
 require('avante').setup()
 EOF
 ```
@@ -146,6 +157,7 @@ add({
   source = 'yetone/avante.nvim',
   monitor = 'main',
   depends = {
+    'nvim-treesitter/nvim-treesitter',
     'stevearc/dressing.nvim',
     'nvim-lua/plenary.nvim',
     'MunifTanjim/nui.nvim',
@@ -159,7 +171,6 @@ add({ source = 'zbirenbaum/copilot.lua' })
 add({ source = 'HakonHarnes/img-clip.nvim' })
 add({ source = 'MeanderingProgrammer/render-markdown.nvim' })
 
-now(function() require('avante_lib').load() end)
 later(function() require('render-markdown').setup({...}) end)
 later(function()
   require('img-clip').setup({...}) -- config img-clip
@@ -177,6 +188,7 @@ end)
 ```vim
 
   -- Required plugins
+  use 'nvim-treesitter/nvim-treesitter'
   use 'stevearc/dressing.nvim'
   use 'nvim-lua/plenary.nvim'
   use 'MunifTanjim/nui.nvim'
@@ -194,10 +206,27 @@ end)
     branch = 'main',
     run = 'make',
     config = function()
-      require('avante_lib').load()
       require('avante').setup()
     end
   }
+```
+
+</details>
+
+<details>
+
+  <summary><a href="https://github.com/nix-community/home-manager">Home Manager</a></summary>
+
+```nix
+programs.neovim = {
+  plugins = [
+    {
+      plugin = pkgs.vimPlugins.avante-nvim;
+      type = "lua";
+      config = ''require("avante").setup()'' # or builtins.readFile ./plugins/avante.lua;
+    }
+  ];
+};
 ```
 
 </details>
@@ -220,19 +249,20 @@ require('copilot').setup ({
 require('render-markdown').setup ({
   -- use recommended settings from above
 })
-require('avante_lib').load()
 require('avante').setup ({
   -- Your config here!
 })
 ```
-
-**NOTE**: For <code>avante.tokenizers</code> and templates to work, make sure to call <code>require('avante_lib').load()</code> somewhere when entering the editor. We will leave the users to decide where it fits to do this, as this varies among configurations. (But we do recommend running this after where you set your colorscheme)
 
 </details>
 
 > [!IMPORTANT]
 >
 > `avante.nvim` is currently only compatible with Neovim 0.10.1 or later. Please ensure that your Neovim version meets these requirements before proceeding.
+
+> [!NOTE]
+>
+> When loading the plugin synchronously, we recommend `require`ing it sometime after your colorscheme.
 
 > [!NOTE]
 >
@@ -254,11 +284,12 @@ _See [config.lua#L9](./lua/avante/config.lua) for the full config_
 ```lua
 {
   ---@alias Provider "claude" | "openai" | "azure" | "gemini" | "cohere" | "copilot" | string
-  provider = "claude", -- Recommend using Claude
+  provider = "claude", -- The provider used in Aider mode or in the planning phase of Cursor Planning Mode
   -- WARNING: Since auto-suggestions are a high-frequency operation and therefore expensive,
   -- currently designating it as `copilot` provider is dangerous because: https://github.com/yetone/avante.nvim/issues/1048
   -- Of course, you can reduce the request frequency by increasing `suggestion.debounce`.
   auto_suggestions_provider = "claude",
+  cursor_applying_provider = nil, -- The provider used in the applying phase of Cursor Planning Mode, defaults to nil, when nil uses Config.provider as the provider for the applying phase
   claude = {
     endpoint = "https://api.anthropic.com",
     model = "claude-3-5-sonnet-20241022",
@@ -289,6 +320,7 @@ _See [config.lua#L9](./lua/avante/config.lua) for the full config_
     support_paste_from_clipboard = false,
     minimize_diff = true, -- Whether to remove unchanged lines when applying a code block
     enable_token_counting = true, -- Whether to enable token counting. Default to true.
+    enable_cursor_planning_mode = false, -- Whether to enable Cursor Planning Mode. Default to false.
   },
   mappings = {
     --- @class AvanteConflictMappings
@@ -375,6 +407,7 @@ _See [config.lua#L9](./lua/avante/config.lua) for the full config_
 ## Blink.cmp users
 For blink cmp users (nvim-cmp alternative) view below instruction for configuration
 This is achieved by emulating nvim-cmp using blink.compat
+or you can use [Kaiser-Yang/blink-cmp-avante](https://github.com/Kaiser-Yang/blink-cmp-avante).
 <details>
   <summary>Lua</summary>
 
@@ -415,6 +448,24 @@ To create a customized file_selector, you can specify a customized function to l
             end
           })
         end,
+        ---below is optional
+        provider_opts = {
+          ---@param params avante.file_selector.opts.IGetFilepathsParams
+          get_filepaths = function(params)
+            local cwd = params.cwd ---@type string
+            local selected_filepaths = params.selected_filepaths ---@type string[]
+            local cmd = string.format("fd --base-directory '%s' --hidden", vim.fn.fnameescape(cwd))
+            local output = vim.fn.system(cmd)
+            local filepaths = vim.split(output, "\n", { trimempty = true })
+            return vim
+              .iter(filepaths)
+              :filter(function(filepath)
+                return not vim.tbl_contains(selected_filepaths, filepath)
+              end)
+              :totable()
+          end
+        }
+        end
       }
 ```
 
@@ -472,10 +523,14 @@ Given its early stage, `avante.nvim` currently supports the following basic func
 
 > [!IMPORTANT]
 >
-> Due to the poor performance of other models, avante.nvim only recommends using the claude-3.5-sonnet model.
-> All features can only be guaranteed to work properly on the claude-3.5-sonnet model.
-> We do not accept changes to the code or prompts to accommodate other models. Otherwise, it will greatly increase our maintenance costs.
-> We hope everyone can understand. Thank you!
+> ~~Due to the poor performance of other models, avante.nvim only recommends using the claude-3.5-sonnet model.~~
+> ~~All features can only be guaranteed to work properly on the claude-3.5-sonnet model.~~
+> ~~We do not accept changes to the code or prompts to accommodate other models. Otherwise, it will greatly increase our maintenance costs.~~
+> ~~We hope everyone can understand. Thank you!~~
+
+> [!IMPORTANT]
+>
+> Since avante.nvim now supports [cursor planning mode](./cursor-planning-mode.md), the above statement is no longer valid! avante.nvim now supports most models! If you encounter issues with normal usage, please try enabling [cursor planning mode](./cursor-planning-mode.md).
 
 > [!IMPORTANT]
 >
@@ -580,18 +635,47 @@ Avante provides a set of default providers, but users can also create their own 
 
 For more information, see [Custom Providers](https://github.com/yetone/avante.nvim/wiki/Custom-providers)
 
+## Cursor planning mode
+
+Because avante.nvim has always used Aider’s method for planning applying, but its prompts are very picky with models and require ones like claude-3.5-sonnet or gpt-4o to work properly.
+
+Therefore, I have adopted Cursor’s method to implement planning applying. For details on the implementation, please refer to [cursor-planning-mode.md](./cursor-planning-mode.md)
+
+## RAG Service
+
+Avante provides a RAG service, which is a tool for obtaining the required context for the AI to generate the codes. Default it not enabled, you can enable it in this way:
+
+```lua
+rag_service = {
+  enabled = true, -- Enables the rag service, requires OPENAI_API_KEY to be set
+},
+```
+
+Please note that since the RAG service uses OpenAI for embeddings, you must set `OPENAI_API_KEY` environment variable!
+
+Additionally, RAG Service also depends on Docker! (For macOS users, OrbStack is recommended as a Docker alternative)
+
 ## Web Search Engines
 
-Avante's tools include some web search engines, currently support [tavily](https://tavily.com/), [serpapi](https://serpapi.com/) and google's [programmable search engine](https://developers.google.com/custom-search/v1/overview). The default is tavily, and can be changed through configuring `Config.web_search_engine.provider`:
+Avante's tools include some web search engines, currently support:
+
+- [tavily](https://tavily.com/)
+- [serpapi](https://serpapi.com/)
+- [searchapi](https://www.searchapi.io/)
+- google's [programmable search engine](https://developers.google.com/custom-search/v1/overview)
+- [kagi](https://help.kagi.com/kagi/api/search.html)
+
+The default is tavily, and can be changed through configuring `Config.web_search_engine.provider`:
 
 ```lua
 web_search_engine = {
-  provider = "tavily", -- tavily, serpapi or google
+  provider = "tavily", -- tavily, serpapi, searchapi, google or kagi
 }
 ```
 
-You need to set the environment variable `TAVILY_API_KEY` , `SERPAPI_API_KEY` to use tavily or serpapi.
+You need to set the environment variable `TAVILY_API_KEY` , `SERPAPI_API_KEY`, `SEARCHAPI_API_KEY` to use tavily or serpapi or searchapi.
 To use google, set the `GOOGLE_SEARCH_API_KEY` as the [API key](https://developers.google.com/custom-search/v1/overview), and `GOOGLE_SEARCH_ENGINE_ID` as the [search engine](https://programmablesearchengine.google.com) ID.
+To use kagi, set the `KAGI_API_KEY` as the [API Token](https://kagi.com/settings?p=api).
 
 ## Disable Tools
 
@@ -617,6 +701,7 @@ By default, `avante.nvim` provides three different modes to interact with: `plan
 - `planning`: Used with `require("avante").toggle()` on sidebar
 - `editing`: Used with `require("avante").edit()` on selection codeblock
 - `suggesting`: Used with `require("avante").get_suggestion():suggest()` on Tab flow.
+- `cursor-planning`: Used with `require("avante").toggle()` on Tab flow, but only when cursor planning mode is enabled.
 
 Users can customize the system prompts via `Config.system_prompt`. We recommend calling this in a custom Autocmds depending on your need:
 
@@ -650,13 +735,14 @@ If you have the following structure:
 ├── .git/
 ├── typescript.planning.avanterules
 ├── snippets.editing.avanterules
+├── suggesting.avanterules
 └── src/
 
 ```
 
 - `typescript.planning.avanterules` will be used for `planning` mode
-- `snippets.editing.avanterules`` will be used for `editing` mode
-- the default `suggesting` prompt from `avante.nvim` will be used for `suggesting` mode.
+- `snippets.editing.avanterules` will be used for `editing` mode
+- `suggesting.avanterules` will be used for `suggesting` mode.
 
 </details>
 

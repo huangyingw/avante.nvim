@@ -10,23 +10,31 @@ local Utils = require("avante.utils")
 ---@field public filepaths  string[]
 ---@field public handler    fun(filepaths: string[]|nil): nil
 
+---@class avante.file_selector.opts.IGetFilepathsParams
+---@field public cwd                string
+---@field public selected_filepaths string[]
+
 ---@class avante.CoreConfig: avante.Config
 local M = {}
 ---@class avante.Config
 M._defaults = {
   debug = false,
   ---@alias Provider "claude" | "openai" | "azure" | "gemini" | "vertex" | "cohere" | "copilot" | string
-  provider = "claude", -- Only recommend using Claude
+  provider = "claude",
   -- WARNING: Since auto-suggestions are a high-frequency operation and therefore expensive,
   -- currently designating it as `copilot` provider is dangerous because: https://github.com/yetone/avante.nvim/issues/1048
   -- Of course, you can reduce the request frequency by increasing `suggestion.debounce`.
   auto_suggestions_provider = "claude",
+  cursor_applying_provider = nil,
   ---@alias Tokenizer "tiktoken" | "hf"
   -- Used for counting tokens and encoding text.
   -- By default, we will use tiktoken.
   -- For most providers that we support we will determine this automatically.
   -- If you wish to use a given implementation, then you can override it here.
   tokenizer = "tiktoken",
+  rag_service = {
+    enabled = false, -- Enables the rag service, requires OPENAI_API_KEY to be set
+  },
   web_search_engine = {
     provider = "tavily",
     providers = {
@@ -36,7 +44,7 @@ M._defaults = {
           include_answer = "basic",
         },
         ---@type WebSearchEngineProviderResponseBodyFormatter
-        format_response_body = function(body) return body.anwser, nil end,
+        format_response_body = function(body) return body.answer, nil end,
       },
       serpapi = {
         api_key_name = "SERPAPI_API_KEY",
@@ -56,10 +64,39 @@ M._defaults = {
                     title = result.title,
                     link = result.link,
                     snippet = result.snippet,
+                    date = result.date,
                   }
                 end
               )
-              :take(5)
+              :take(10)
+              :totable()
+            return vim.json.encode(jsn), nil
+          end
+          return "", nil
+        end,
+      },
+      searchapi = {
+        api_key_name = "SEARCHAPI_API_KEY",
+        extra_request_body = {
+          engine = "google",
+        },
+        ---@type WebSearchEngineProviderResponseBodyFormatter
+        format_response_body = function(body)
+          if body.answer_box ~= nil then return body.answer_box.result, nil end
+          if body.organic_results ~= nil then
+            local jsn = vim
+              .iter(body.organic_results)
+              :map(
+                function(result)
+                  return {
+                    title = result.title,
+                    link = result.link,
+                    snippet = result.snippet,
+                    date = result.date,
+                  }
+                end
+              )
+              :take(10)
               :totable()
             return vim.json.encode(jsn), nil
           end
@@ -84,7 +121,35 @@ M._defaults = {
                   }
                 end
               )
-              :take(5)
+              :take(10)
+              :totable()
+            return vim.json.encode(jsn), nil
+          end
+          return "", nil
+        end,
+      },
+      kagi = {
+        api_key_name = "KAGI_API_KEY",
+        extra_request_body = {
+          limit = "10",
+        },
+        ---@type WebSearchEngineProviderResponseBodyFormatter
+        format_response_body = function(body)
+          if body.data ~= nil then
+            local jsn = vim
+              .iter(body.data)
+              -- search results only
+              :filter(function(result) return result.t == 0 end)
+              :map(
+                function(result)
+                  return {
+                    title = result.title,
+                    url = result.url,
+                    snippet = result.snippet,
+                  }
+                end
+              )
+              :take(10)
               :totable()
             return vim.json.encode(jsn), nil
           end
@@ -122,12 +187,12 @@ M._defaults = {
   },
   ---@type AvanteSupportedProvider
   claude = {
-      endpoint = "https://api.anthropic.com",
-      model = "claude-3-haiku-20240307",
-      timeout = 30000, -- Timeout in milliseconds
-      temperature = 0,
-      max_tokens = 4096,
-    },
+    endpoint = "https://api.anthropic.com",
+    model = "claude-3-7-sonnet-20250219",
+    timeout = 30000, -- Timeout in milliseconds
+    temperature = 0,
+    max_tokens = 8000,
+  },
   ---@type AvanteSupportedProvider
   bedrock = {
     model = "anthropic.claude-3-5-sonnet-20240620-v1:0",
@@ -146,7 +211,7 @@ M._defaults = {
   ---@type AvanteSupportedProvider
   vertex = {
     endpoint = "https://LOCATION-aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/LOCATION/publishers/google/models",
-    model = "gemini-1.5-flash-latest",
+    model = "gemini-1.5-flash-002",
     timeout = 30000, -- Timeout in milliseconds
     temperature = 0,
     max_tokens = 4096,
@@ -219,6 +284,7 @@ M._defaults = {
     support_paste_from_clipboard = false,
     minimize_diff = true,
     enable_token_counting = true,
+    enable_cursor_planning_mode = false,
   },
   history = {
     max_tokens = 4096,
@@ -229,10 +295,9 @@ M._defaults = {
     },
   },
   highlights = {
-    ---@type AvanteConflictHighlights
     diff = {
-      current = "DiffText",
-      incoming = "DiffAdd",
+      current = nil,
+      incoming = nil,
     },
   },
   mappings = {
@@ -275,6 +340,8 @@ M._defaults = {
     sidebar = {
       apply_all = "A",
       apply_cursor = "a",
+      retry_user_request = "r",
+      edit_user_request = "e",
       switch_windows = "<Tab>",
       reverse_switch_windows = "<S-Tab>",
       remove_file = "d",
@@ -284,6 +351,7 @@ M._defaults = {
     files = {
       add_current = "<leader>ac", -- Add current buffer to selected files
     },
+    select_model = "<leader>a?", -- Select model command
   },
   windows = {
     ---@alias AvantePosition "right" | "left" | "top" | "bottom" | "smart"
@@ -320,6 +388,10 @@ M._defaults = {
     --- Disable by setting to -1.
     override_timeoutlen = 500,
   },
+  run_command = {
+    -- Only applies to macOS and Linux
+    shell_cmd = "sh -c",
+  },
   --- @class AvanteHintsConfig
   hints = {
     enabled = true,
@@ -343,12 +415,8 @@ M._defaults = {
 }
 
 ---@type avante.Config
+---@diagnostic disable-next-line: missing-fields
 M._options = {}
-
----@class avante.ConflictConfig: AvanteConflictConfig
----@field mappings AvanteConflictMappings
----@field highlights AvanteConflictHighlights
-M.diff = {}
 
 ---@type Provider[]
 M.providers = {}
@@ -381,13 +449,6 @@ function M.setup(opts)
 
   vim.validate({ provider = { M._options.provider, "string", false } })
 
-  M.diff = vim.tbl_deep_extend(
-    "force",
-    {},
-    M._options.diff,
-    { mappings = M._options.mappings.diff, highlights = M._options.highlights.diff }
-  )
-
   if next(M._options.vendors) ~= nil then
     for k, v in pairs(M._options.vendors) do
       M._options.vendors[k] = type(v) == "function" and v() or v
@@ -397,17 +458,11 @@ function M.setup(opts)
   end
 end
 
----@param opts? avante.Config
+---@param opts table<string, any>
 function M.override(opts)
   vim.validate({ opts = { opts, "table", true } })
 
   M._options = vim.tbl_deep_extend("force", M._options, opts or {})
-  M.diff = vim.tbl_deep_extend(
-    "force",
-    {},
-    M._options.diff,
-    { mappings = M._options.mappings.diff, highlights = M._options.highlights.diff }
-  )
 
   if next(M._options.vendors) ~= nil then
     for k, v in pairs(M._options.vendors) do
@@ -424,18 +479,18 @@ M = setmetatable(M, {
   end,
 })
 
-M.support_paste_image = function() return Utils.has("img-clip.nvim") or Utils.has("img-clip") end
+function M.support_paste_image() return Utils.has("img-clip.nvim") or Utils.has("img-clip") end
 
-M.get_window_width = function() return math.ceil(vim.o.columns * (M.windows.width / 100)) end
+function M.get_window_width() return math.ceil(vim.o.columns * (M.windows.width / 100)) end
 
 ---@param provider Provider
 ---@return boolean
-M.has_provider = function(provider) return M._options[provider] ~= nil or M.vendors[provider] ~= nil end
+function M.has_provider(provider) return M._options[provider] ~= nil or M.vendors[provider] ~= nil end
 
 ---get supported providers
 ---@param provider Provider
 ---@return AvanteProviderFunctor
-M.get_provider = function(provider)
+function M.get_provider(provider)
   if M._options[provider] ~= nil then
     return vim.deepcopy(M._options[provider], true)
   elseif M.vendors and M.vendors[provider] ~= nil then

@@ -3,36 +3,6 @@ local Clipboard = require("avante.clipboard")
 local P = require("avante.providers")
 local Logger = require("avante.logger")
 
----@class AvanteClaudeBaseMessage
----@field cache_control {type: "ephemeral"}?
----
----@class AvanteClaudeTextMessage: AvanteClaudeBaseMessage
----@field type "text"
----@field text string
----
----@class AvanteClaudeImageMessage: AvanteClaudeBaseMessage
----@field type "image"
----@field source {type: "base64", media_type: string, data: string}
----
----@class AvanteClaudeMessage
----@field role "user" | "assistant"
----@field content [AvanteClaudeTextMessage | AvanteClaudeImageMessage][]
-
----@class AvanteClaudeTool
----@field name string
----@field description string
----@field input_schema AvanteClaudeToolInputSchema
-
----@class AvanteClaudeToolInputSchema
----@field type "object"
----@field properties table<string, AvanteClaudeToolInputSchemaProperty>
----@field required string[]
-
----@class AvanteClaudeToolInputSchemaProperty
----@field type "string" | "number" | "boolean"
----@field description string
----@field enum? string[]
-
 ---@param tool AvanteLLMTool
 ---@return AvanteClaudeTool
 local function transform_tool(tool)
@@ -67,7 +37,7 @@ M.role_map = {
   assistant = "assistant",
 }
 
-M.parse_messages = function(opts)
+function M.parse_messages(opts)
   ---@type AvanteClaudeMessage[]
   local messages = {}
 
@@ -154,7 +124,7 @@ M.parse_messages = function(opts)
   return messages
 end
 
-M.parse_response = function(ctx, data_stream, event_state, opts)
+function M.parse_response(ctx, data_stream, event_state, opts)
   if event_state == nil then
     if data_stream:match('"message_start"') then
       event_state = "message_start"
@@ -199,7 +169,26 @@ M.parse_response = function(ctx, data_stream, event_state, opts)
     elseif ctx.response_content and jsn.delta.type == "text_delta" then
       ctx.response_content = ctx.response_content .. jsn.delta.text
     end
-    opts.on_chunk(jsn.delta.text)
+    if jsn.delta.type == "thinking_delta" then
+      if ctx.returned_think_start_tag == nil or not ctx.returned_think_start_tag then
+        ctx.returned_think_start_tag = true
+        opts.on_chunk("<think>\n")
+      end
+      ctx.last_think_content = jsn.delta.thinking
+      opts.on_chunk(jsn.delta.thinking)
+    elseif jsn.delta.type == "text_delta" then
+      if
+        ctx.returned_think_start_tag ~= nil and (ctx.returned_think_end_tag == nil or not ctx.returned_think_end_tag)
+      then
+        ctx.returned_think_end_tag = true
+        if ctx.last_think_content and ctx.last_think_content ~= vim.NIL and ctx.last_think_content:sub(-1) ~= "\n" then
+          opts.on_chunk("\n</think>\n\n")
+        else
+          opts.on_chunk("</think>\n\n")
+        end
+      end
+      opts.on_chunk(jsn.delta.text)
+    end
   elseif event_state == "content_block_stop" then
     if ctx.tool_use_list then
       local tool_use = ctx.tool_use_list[#ctx.tool_use_list]
@@ -225,8 +214,9 @@ end
 ---@param provider AvanteProviderFunctor
 ---@param prompt_opts AvantePromptOptions
 ---@return table
-M.parse_curl_args = function(provider, prompt_opts)
+function M.parse_curl_args(provider, prompt_opts)
   local provider_conf, request_body = P.parse_config(provider)
+  local disable_tools = provider_conf.disable_tools or false
 
   local headers = {
     ["Content-Type"] = "application/json",
@@ -239,7 +229,7 @@ M.parse_curl_args = function(provider, prompt_opts)
   local messages = M.parse_messages(prompt_opts)
 
   local tools = {}
-  if prompt_opts.tools then
+  if not disable_tools and prompt_opts.tools then
     for _, tool in ipairs(prompt_opts.tools) do
       table.insert(tools, transform_tool(tool))
     end
@@ -266,7 +256,7 @@ M.parse_curl_args = function(provider, prompt_opts)
   }
 end
 
-M.on_error = function(result)
+function M.on_error(result)
   if not result.body then
     return Utils.error("API request failed with status " .. result.status, { once = true, title = "Avante" })
   end
