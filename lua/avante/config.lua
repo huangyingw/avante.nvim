@@ -188,10 +188,10 @@ M._defaults = {
   ---@type AvanteSupportedProvider
   claude = {
     endpoint = "https://api.anthropic.com",
-    model = "claude-3-7-sonnet-20250219",
+    model = "claude-3-haiku-20240307",
     timeout = 30000, -- Timeout in milliseconds
     temperature = 0,
-    max_tokens = 8000,
+    max_tokens = 4096,
   },
   ---@type AvanteSupportedProvider
   bedrock = {
