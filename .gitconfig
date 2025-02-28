@@ -27,3 +27,5 @@
   ignore = ./lua/avante/logger.lua
   ignore = ./.config/nvim/diff.lua
   ignore = ./neovim/init.lua
+  ignore = ./macOS_paste_guide.md
+  ignore = ./paste_image.sh
