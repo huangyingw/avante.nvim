@@ -26,7 +26,7 @@ end
 
 M.support_paste_image = Config.support_paste_image
 
-M.setup = function()
+function M.setup()
   get_paste_directory()
 
   if not paste_directory:exists() then paste_directory:mkdir({ parent = true }) end
@@ -35,7 +35,7 @@ M.setup = function()
 end
 
 ---@param line? string
-M.paste_image = function(line)
+function M.paste_image(line)
   line = line or nil
   if not Config.support_paste_image() then return false end
 
@@ -49,11 +49,12 @@ M.paste_image = function(line)
 
   if vim.fn.has("wsl") > 0 or vim.fn.has("win32") > 0 then opts.use_absolute_path = true end
 
+  ---@diagnostic disable-next-line: need-check-nil, undefined-field
   return ImgClip.paste_image(opts, line)
 end
 
 ---@param filepath string
-M.get_base64_content = function(filepath)
+function M.get_base64_content(filepath)
   local os_mapping = Utils.get_os_name()
 
   ---@type vim.SystemCompleted
@@ -76,6 +77,13 @@ M.get_base64_content = function(filepath)
     Logger.write_log("Error: " .. (output.stderr or "unknown error"))
     error("Failed to convert image to base64")
   end
+end
+
+M.get_paste_status = function()
+  if vim.bo.filetype == 'AvanteInput' then
+    return "Paste Mode: Image Ready"
+  end
+  return ""
 end
 
 return M

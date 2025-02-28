@@ -17,13 +17,20 @@ M.parse_messages = O.parse_messages
 M.parse_response = O.parse_response
 M.parse_response_without_stream = O.parse_response_without_stream
 
-M.parse_curl_args = function(provider, prompt_opts)
+function M.parse_curl_args(provider, prompt_opts)
   local provider_conf, request_body = P.parse_config(provider)
 
   local headers = {
     ["Content-Type"] = "application/json",
   }
-  if P.env.require_api_key(provider_conf) then headers["api-key"] = provider.parse_api_key() end
+
+  if P.env.require_api_key(provider_conf) then
+    if provider_conf.entra then
+      headers["Authorization"] = "Bearer " .. provider.parse_api_key()
+    else
+      headers["api-key"] = provider.parse_api_key()
+    end
+  end
 
   -- NOTE: When using "o" series set the supported parameters only
   if O.is_o_series_model(provider_conf.model) then
@@ -35,8 +42,10 @@ M.parse_curl_args = function(provider, prompt_opts)
     url = Utils.url_join(
       provider_conf.endpoint,
       "/openai/deployments/"
+        ---@diagnostic disable-next-line: undefined-field
         .. provider_conf.deployment
         .. "/chat/completions?api-version="
+        ---@diagnostic disable-next-line: undefined-field
         .. provider_conf.api_version
     ),
     proxy = provider_conf.proxy,

@@ -6,6 +6,7 @@ local Selection = require("avante.selection")
 local Suggestion = require("avante.suggestion")
 local Config = require("avante.config")
 local Diff = require("avante.diff")
+local RagService = require("avante.rag_service")
 
 ---@class Avante
 local M = {
@@ -23,12 +24,13 @@ M.did_setup = false
 
 local H = {}
 
-H.load_path = function()
+function H.load_path()
   local ok, LazyConfig = pcall(require, "lazy.core.config")
 
   if ok then
+    Utils.debug("LazyConfig loaded")
     local name = "avante.nvim"
-    local load_path = function() require("avante_lib").load() end
+    local function load_path() require("avante_lib").load() end
 
     if LazyConfig.plugins[name] and LazyConfig.plugins[name]._.loaded then
       vim.schedule(load_path)
@@ -48,10 +50,12 @@ H.load_path = function()
       pattern = "VeryLazy",
       callback = load_path,
     })
+  else
+    require("avante_lib").load()
   end
 end
 
-H.keymaps = function()
+function H.keymaps()
   vim.keymap.set({ "n", "v" }, "<Plug>(AvanteAsk)", function() require("avante.api").ask() end, { noremap = true })
   vim.keymap.set(
     { "n", "v" },
@@ -75,6 +79,7 @@ H.keymaps = function()
   vim.keymap.set({ "n", "v" }, "<Plug>(AvanteConflictCursor)", function() Diff.choose("cursor") end)
   vim.keymap.set("n", "<Plug>(AvanteConflictNextConflict)", function() Diff.find_next("ours") end)
   vim.keymap.set("n", "<Plug>(AvanteConflictPrevConflict)", function() Diff.find_prev("ours") end)
+  vim.keymap.set("n", "<Plug>(AvanteSelectModel)", function() require("avante.api").select_model() end)
 
   if Config.behaviour.auto_set_keymaps then
     Utils.safe_keymap_set(
@@ -126,6 +131,12 @@ H.keymaps = function()
       noremap = true,
       silent = true,
     })
+    Utils.safe_keymap_set(
+      "n",
+      Config.mappings.select_model,
+      function() require("avante.api").select_model() end,
+      { desc = "avante: select model" }
+    )
   end
 
   if Config.behaviour.auto_suggestions then
@@ -170,17 +181,17 @@ end
 ---@class ApiCaller
 ---@operator call(...): any
 
-H.api = function(fun)
+function H.api(fun)
   return setmetatable({ api = true }, {
     __call = function(...) return fun(...) end,
   }) --[[@as ApiCaller]]
 end
 
-H.signs = function() vim.fn.sign_define("AvanteInputPromptSign", { text = Config.windows.input.prefix }) end
+function H.signs() vim.fn.sign_define("AvanteInputPromptSign", { text = Config.windows.input.prefix }) end
 
 H.augroup = api.nvim_create_augroup("avante_autocmds", { clear = true })
 
-H.autocmds = function()
+function H.autocmds()
   api.nvim_create_autocmd("TabEnter", {
     group = H.augroup,
     pattern = "*",
@@ -283,13 +294,14 @@ end
 M.toggle = { api = true }
 
 ---@param opts? AskOptions
-M.toggle_sidebar = function(opts)
+function M.toggle_sidebar(opts)
   opts = opts or {}
   if opts.ask == nil then opts.ask = true end
 
   local sidebar = M.get()
   if not sidebar then
     M._init(api.nvim_get_current_tabpage())
+    ---@cast opts SidebarOpenOptions
     M.current.sidebar:open(opts)
     return true
   end
@@ -297,22 +309,23 @@ M.toggle_sidebar = function(opts)
   return sidebar:toggle(opts)
 end
 
-M.is_sidebar_open = function()
+function M.is_sidebar_open()
   local sidebar = M.get()
   if not sidebar then return false end
   return sidebar:is_open()
 end
 
 ---@param opts? AskOptions
-M.open_sidebar = function(opts)
+function M.open_sidebar(opts)
   opts = opts or {}
   if opts.ask == nil then opts.ask = true end
   local sidebar = M.get()
   if not sidebar then M._init(api.nvim_get_current_tabpage()) end
+  ---@cast opts SidebarOpenOptions
   M.current.sidebar:open(opts)
 end
 
-M.close_sidebar = function()
+function M.close_sidebar()
   local sidebar = M.get()
   if not sidebar then return end
   sidebar:close()
@@ -374,6 +387,38 @@ function M.setup(opts)
   H.signs()
 
   M.did_setup = true
+
+  local function run_rag_service()
+    local started_at = os.time()
+    local add_resource_with_delay
+    local function add_resource()
+      local is_ready = RagService.is_ready()
+      if not is_ready then
+        local elapsed = os.time() - started_at
+        if elapsed > 1000 * 60 * 15 then
+          Utils.warn("Rag Service is not ready, giving up")
+          return
+        end
+        add_resource_with_delay()
+        return
+      end
+      vim.defer_fn(function()
+        Utils.info("Adding project root to Rag Service ...")
+        local uri = "file://" .. Utils.get_project_root()
+        if uri:sub(-1) ~= "/" then uri = uri .. "/" end
+        RagService.add_resource(uri)
+      end, 5000)
+    end
+    add_resource_with_delay = function()
+      vim.defer_fn(function() add_resource() end, 5000)
+    end
+    vim.schedule(function()
+      Utils.info("Starting Rag Service ...")
+      RagService.launch_rag_service(add_resource_with_delay)
+    end)
+  end
+
+  if Config.rag_service.enabled then run_rag_service() end
 end
 
 return M

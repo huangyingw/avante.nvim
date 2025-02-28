@@ -25,3 +25,5 @@
   ignore = ./docker/*
   ignore = ./README.md
   ignore = ./lua/avante/logger.lua
+  ignore = ./.config/nvim/diff.lua
+  ignore = ./neovim/init.lua

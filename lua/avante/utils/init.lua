@@ -24,16 +24,18 @@ setmetatable(M, {
 ---Check if a plugin is installed
 ---@param plugin string
 ---@return boolean
-M.has = function(plugin)
+function M.has(plugin)
   local ok, LazyConfig = pcall(require, "lazy.core.config")
   if ok then return LazyConfig.plugins[plugin] ~= nil end
-  return package.loaded[plugin] ~= nil
+
+  local res, _ = pcall(require, plugin)
+  return res ~= nil
 end
 
-M.is_win = function() return jit.os:find("Windows") ~= nil end
+function M.is_win() return jit.os:find("Windows") ~= nil end
 
 ---@return "linux" | "darwin" | "windows"
-M.get_os_name = function()
+function M.get_os_name()
   local os_name = vim.uv.os_uname().sysname
   if os_name == "Linux" then
     return "linux"
@@ -46,7 +48,7 @@ M.get_os_name = function()
   end
 end
 
-M.get_system_info = function()
+function M.get_system_info()
   local os_name = vim.loop.os_uname().sysname
   local os_version = vim.loop.os_uname().release
   local os_machine = vim.loop.os_uname().machine
@@ -71,13 +73,11 @@ M.get_system_info = function()
   return res
 end
 
---- This function will run given shell command synchronously.
 ---@param input_cmd string
----@return vim.SystemCompleted
-M.shell_run = function(input_cmd)
+---@param shell_cmd string?
+local function get_cmd_for_shell(input_cmd, shell_cmd)
   local shell = vim.o.shell:lower()
-  ---@type string
-  local cmd
+  local cmd ---@type string
 
   -- powershell then we can just run the cmd
   if shell:match("powershell") or shell:match("pwsh") then
@@ -88,14 +88,45 @@ M.shell_run = function(input_cmd)
   elseif fn.has("win32") > 0 then
     cmd = 'powershell.exe -NoProfile -Command "' .. input_cmd:gsub('"', "'") .. '"'
   else
-    -- linux and macos we wil just do sh -c
-    cmd = "sh -c " .. fn.shellescape(input_cmd)
+    -- linux and macos we will just do sh -c
+    shell_cmd = shell_cmd or "sh -c"
+    cmd = shell_cmd .. " " .. fn.shellescape(input_cmd)
   end
+
+  return cmd
+end
+
+--- This function will run given shell command synchronously.
+---@param input_cmd string
+---@param shell_cmd string?
+---@return vim.SystemCompleted
+function M.shell_run(input_cmd, shell_cmd)
+  local cmd = get_cmd_for_shell(input_cmd, shell_cmd)
 
   local output = fn.system(cmd)
   local code = vim.v.shell_error
 
   return { stdout = output, code = code }
+end
+
+---@param input_cmd string
+---@param shell_cmd string?
+---@param on_complete fun(output: string, code: integer)
+function M.shell_run_async(input_cmd, shell_cmd, on_complete)
+  local cmd = get_cmd_for_shell(input_cmd, shell_cmd)
+  ---@type string[]
+  local output = {}
+  fn.jobstart(cmd, {
+    on_stdout = function(_, data)
+      if not data then return end
+      vim.list_extend(output, data)
+    end,
+    on_stderr = function(_, data)
+      if not data then return end
+      vim.list_extend(output, data)
+    end,
+    on_exit = function(_, exit_code) on_complete(table.concat(output, "\n"), exit_code) end,
+  })
 end
 
 ---@see https://github.com/LazyVim/LazyVim/blob/main/lua/lazyvim/util/toggle.lua
@@ -112,7 +143,7 @@ end
 ---@operator call:boolean
 
 ---@param toggle ToggleBind
-M.toggle_wrap = function(toggle)
+function M.toggle_wrap(toggle)
   return setmetatable(toggle, {
     __call = function()
       toggle.set(not toggle.get())
@@ -137,11 +168,7 @@ end
 ---@param rhs string|function  Right-hand side |{rhs}| of the mapping, can be a Lua function.
 ---
 ---@param opts? vim.keymap.set.Opts
----@see |nvim_set_keymap()|
----@see |maparg()|
----@see |mapcheck()|
----@see |mapset()|
-M.safe_keymap_set = function(mode, lhs, rhs, opts)
+function M.safe_keymap_set(mode, lhs, rhs, opts)
   ---@type boolean
   local ok
   ---@module "lazy.core.handler"
@@ -160,6 +187,7 @@ M.safe_keymap_set = function(mode, lhs, rhs, opts)
   ---@cast modes -string
 
   ---@param m string
+  ---@diagnostic disable-next-line: undefined-field
   modes = vim.tbl_filter(function(m) return not (Keys and Keys.have and Keys:have(lhs, m)) end, modes)
 
   -- don't create keymap if a lazy keys handler exists
@@ -250,6 +278,7 @@ function M.get_buf_lines(start, end_, buf) return api.nvim_buf_get_lines(buf or 
 ---Get cursor row and column as (1, 0) based
 ---@param win_id integer?
 ---@return integer, integer
+---@diagnostic disable-next-line: redundant-return-value
 function M.get_cursor_pos(win_id) return unpack(api.nvim_win_get_cursor(win_id or 0)) end
 
 ---Check if the buffer is likely to have actionable conflict markers
@@ -273,7 +302,7 @@ M.lsp = {}
 
 ---@param opts? vim.lsp.Client.filter
 ---@return vim.lsp.Client[]
-M.lsp.get_clients = function(opts)
+function M.lsp.get_clients(opts)
   ---@type vim.lsp.Client[]
   local ret = vim.lsp.get_clients(opts)
   return (opts and opts.filter) and vim.tbl_filter(opts.filter, ret) or ret
@@ -412,7 +441,7 @@ end
 
 ---@param winnr? number
 ---@return nil
-M.scroll_to_end = function(winnr)
+function M.scroll_to_end(winnr)
   winnr = winnr or 0
   local bufnr = api.nvim_win_get_buf(winnr)
   local lnum = api.nvim_buf_line_count(bufnr)
@@ -422,7 +451,7 @@ end
 
 ---@param bufnr nil|integer
 ---@return nil
-M.buf_scroll_to_end = function(bufnr)
+function M.buf_scroll_to_end(bufnr)
   for _, winnr in ipairs(M.buf_list_wins(bufnr or 0)) do
     M.scroll_to_end(winnr)
   end
@@ -430,7 +459,7 @@ end
 
 ---@param bufnr nil|integer
 ---@return integer[]
-M.buf_list_wins = function(bufnr)
+function M.buf_list_wins(bufnr)
   local wins = {}
 
   if not bufnr or bufnr == 0 then bufnr = api.nvim_get_current_buf() end
@@ -660,58 +689,98 @@ function M.is_ignored(file, ignore_patterns, negate_patterns)
   return false
 end
 
----@param options { directory: string, add_dirs?: boolean, depth?: integer }
-function M.scan_directory_respect_gitignore(options)
-  local directory = options.directory
-  local gitignore_path = directory .. "/.gitignore"
-  local gitignore_patterns, gitignore_negate_patterns = M.parse_gitignore(gitignore_path)
-  return M.scan_directory({
-    directory = directory,
-    gitignore_patterns = gitignore_patterns,
-    gitignore_negate_patterns = gitignore_negate_patterns,
-    add_dirs = options.add_dirs,
-    depth = options.depth,
-  })
-end
-
----@param options { directory: string, gitignore_patterns: string[], gitignore_negate_patterns: string[], add_dirs?: boolean, depth?: integer, current_depth?: integer }
+---@param options { directory: string, add_dirs?: boolean, max_depth?: integer }
+---@return string[]
 function M.scan_directory(options)
-  local directory = options.directory
-  local ignore_patterns = options.gitignore_patterns
-  local negate_patterns = options.gitignore_negate_patterns
-  local add_dirs = options.add_dirs or false
-  local depth = options.depth or -1
-  local current_depth = options.current_depth or 0
-
-  local files = {}
-  local handle = vim.loop.fs_scandir(directory)
-
-  if not handle then return files end
-
-  while true do
-    if depth > 0 and current_depth >= depth then break end
-
-    local name, type = vim.loop.fs_scandir_next(handle)
-    if not name then break end
-
-    local full_path = directory .. "/" .. name
-    if type == "directory" then
-      if add_dirs and not M.is_ignored(full_path, ignore_patterns, negate_patterns) then
-        table.insert(files, full_path)
-      end
-      vim.list_extend(
-        files,
-        M.scan_directory({
-          directory = full_path,
-          gitignore_patterns = ignore_patterns,
-          gitignore_negate_patterns = negate_patterns,
-          add_dirs = add_dirs,
-          current_depth = current_depth + 1,
-        })
-      )
-    elseif type == "file" then
-      if not M.is_ignored(full_path, ignore_patterns, negate_patterns) then table.insert(files, full_path) end
+  local cmd_supports_max_depth = true
+  local cmd = (function()
+    if vim.fn.executable("rg") == 1 then
+      local cmd = { "rg", "--files", "--color", "never", "--no-require-git" }
+      if options.max_depth ~= nil then vim.list_extend(cmd, { "--max-depth", options.max_depth }) end
+      table.insert(cmd, options.directory)
+      return cmd
     end
+    if vim.fn.executable("fd") == 1 then
+      local cmd = { "fd", "--type", "f", "--color", "never", "--no-require-git" }
+      if options.max_depth ~= nil then vim.list_extend(cmd, { "--max-depth", options.max_depth }) end
+      vim.list_extend(cmd, { "--base-directory", options.directory })
+      return cmd
+    end
+    if vim.fn.executable("fdfind") == 1 then
+      local cmd = { "fdfind", "--type", "f", "--color", "never", "--no-require-git" }
+      if options.max_depth ~= nil then vim.list_extend(cmd, { "--max-depth", options.max_depth }) end
+      vim.list_extend(cmd, { "--base-directory", options.directory })
+      return cmd
+    end
+  end)()
+
+  if not cmd then
+    local p = Path:new(options.directory)
+    if p:joinpath(".git"):exists() and vim.fn.executable("git") == 1 then
+      if vim.fn.has("win32") == 1 then
+        cmd = {
+          "powershell",
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          string.format(
+            "Push-Location '%s'; (git ls-files --exclude-standard), (git ls-files --exclude-standard --others)",
+            options.directory:gsub("/", "\\")
+          ),
+        }
+      else
+        cmd = {
+          "bash",
+          "-c",
+          string.format(
+            "cd %s && cat <(git ls-files --exclude-standard) <(git ls-files --exclude-standard --others)",
+            options.directory
+          ),
+        }
+      end
+      cmd_supports_max_depth = false
+    else
+      M.error("No search command found")
+      return {}
+    end
+  end
+
+  local files = vim.fn.systemlist(cmd)
+
+  files = vim
+    .iter(files)
+    :map(function(file)
+      local p = Path:new(file)
+      if not p:is_absolute() then return tostring(Path:new(options.directory):joinpath(file):absolute()) end
+      return file
+    end)
+    :totable()
+
+  if options.max_depth ~= nil and not cmd_supports_max_depth then
+    files = vim
+      .iter(files)
+      :filter(function(file)
+        local base_dir = options.directory
+        if base_dir:sub(-2) == "/." then base_dir = base_dir:sub(1, -3) end
+        local rel_path = tostring(Path:new(file):make_relative(base_dir))
+        local pieces = vim.split(rel_path, "/")
+        return #pieces <= options.max_depth
+      end)
+      :totable()
+  end
+
+  if options.add_dirs then
+    local dirs = {}
+    local dirs_seen = {}
+    for _, file in ipairs(files) do
+      local dir = tostring(Path:new(file):parent())
+      dir = dir .. "/"
+      if not dirs_seen[dir] then
+        table.insert(dirs, dir)
+        dirs_seen[dir] = true
+      end
+    end
+    files = vim.list_extend(dirs, files)
   end
 
   return files
@@ -879,9 +948,10 @@ function M.get_current_selection_diagnostics(bufnr, selection)
 end
 
 function M.uniform_path(path)
+  if type(path) ~= "string" then path = tostring(path) end
   if not M.file.is_in_cwd(path) then return path end
   local project_root = M.get_project_root()
-  local abs_path = Path:new(project_root):joinpath(path):absolute()
+  local abs_path = Path:new(path):is_absolute() and path or Path:new(project_root):joinpath(path):absolute()
   local relative_path = Path:new(abs_path):make_relative(project_root)
   return relative_path
 end
@@ -901,12 +971,12 @@ function M.get_filetype(filepath)
   return filetype
 end
 
----@param file_path string
+---@param filepath string
 ---@return string[]|nil lines
 ---@return string|nil error
-function M.read_file_from_buf_or_disk(file_path)
+function M.read_file_from_buf_or_disk(filepath)
   --- Lookup if the file is loaded in a buffer
-  local bufnr = vim.fn.bufnr(file_path)
+  local bufnr = vim.fn.bufnr(filepath)
   if bufnr ~= -1 and vim.api.nvim_buf_is_loaded(bufnr) then
     -- If buffer exists and is loaded, get buffer content
     local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
@@ -914,20 +984,19 @@ function M.read_file_from_buf_or_disk(file_path)
   end
 
   -- Fallback: read file from disk
-  local file, open_err = io.open(file_path, "r")
+  local file, open_err = io.open(filepath, "r")
   if file then
     local content = file:read("*all")
     file:close()
     return vim.split(content, "\n"), nil
   else
-    -- M.error("failed to open file: " .. file_path .. " with error: " .. open_err)
     return {}, open_err
   end
 end
 
 ---Check if an icon plugin is installed
 ---@return boolean
-M.icons_enabled = function() return M.has("nvim-web-devicons") or M.has("mini.icons") or M.has("mini.nvim") end
+function M.icons_enabled() return M.has("nvim-web-devicons") or M.has("mini.icons") or M.has("mini.nvim") end
 
 ---Display an string with icon, if an icon plugin is available.
 ---Dev icons are an optional install for avante, this function prevents ugly chars
@@ -935,7 +1004,7 @@ M.icons_enabled = function() return M.has("nvim-web-devicons") or M.has("mini.ic
 ---@param string_with_icon string
 ---@param utf8_fallback string|nil
 ---@return string
-M.icon = function(string_with_icon, utf8_fallback)
+function M.icon(string_with_icon, utf8_fallback)
   if M.icons_enabled() then
     return string_with_icon
   else
