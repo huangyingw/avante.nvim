@@ -67,31 +67,43 @@ function M.generate_prompts(opts)
 
   if opts.project_context ~= nil and opts.project_context ~= "" and opts.project_context ~= "null" then
     local project_context = Path.prompts.render_file("_project.avanterules", template_opts)
-    if project_context ~= "" then table.insert(messages, { role = "user", content = project_context }) end
+    if project_context ~= "" then
+      table.insert(messages, { role = "user", content = { { type = "text", text = project_context } } })
+    end
   end
 
   if opts.diagnostics ~= nil and opts.diagnostics ~= "" and opts.diagnostics ~= "null" then
     local diagnostics = Path.prompts.render_file("_diagnostics.avanterules", template_opts)
-    if diagnostics ~= "" then table.insert(messages, { role = "user", content = diagnostics }) end
+    if diagnostics ~= "" then
+      table.insert(messages, { role = "user", content = { { type = "text", text = diagnostics } } })
+    end
   end
 
   if (opts.selected_files and #opts.selected_files > 0 or false) or opts.selected_code ~= nil then
     local code_context = Path.prompts.render_file("_context.avanterules", template_opts)
-    if code_context ~= "" then table.insert(messages, { role = "user", content = code_context }) end
+    if code_context ~= "" then
+      table.insert(messages, { role = "user", content = { { type = "text", text = code_context } } })
+    end
   end
 
   if instructions then
     if opts.use_xml_format then
-      table.insert(messages, { role = "user", content = string.format("<question>%s</question>", instructions) })
+      table.insert(messages, {
+        role = "user",
+        content = { { type = "text", text = string.format("<question>%s</question>", instructions) } },
+      })
     else
-      table.insert(messages, { role = "user", content = string.format("QUESTION:\n%s", instructions) })
+      table.insert(
+        messages,
+        { role = "user", content = { { type = "text", text = string.format("QUESTION:\n%s", instructions) } } }
+      )
     end
   end
 
   local remaining_tokens = max_tokens - Utils.tokens.calculate_tokens(system_prompt)
 
   for _, message in ipairs(messages) do
-    remaining_tokens = remaining_tokens - Utils.tokens.calculate_tokens(message.content)
+    remaining_tokens = remaining_tokens - Utils.tokens.calculate_message_content_tokens(message.content)
   end
 
   if opts.history_messages then
@@ -100,7 +112,7 @@ function M.generate_prompts(opts)
     local history_messages = {}
     for i = #opts.history_messages, 1, -1 do
       local message = opts.history_messages[i]
-      local tokens = Utils.tokens.calculate_tokens(message.content)
+      local tokens = Utils.tokens.calculate_message_content_tokens(message.content)
       remaining_tokens = remaining_tokens - tokens
       if remaining_tokens > 0 then
         table.insert(history_messages, message)
@@ -126,7 +138,7 @@ Merge all changes from the <update> snippet into the <code> below.
       user_prompt = user_prompt .. string.format("<update>\n%s\n</update>\n", snippet)
     end
     user_prompt = user_prompt .. "Provide the complete updated code."
-    table.insert(messages, { role = "user", content = user_prompt })
+    table.insert(messages, { role = "user", content = { { type = "text", text = user_prompt } } })
   end
 
   ---@type AvantePromptOptions
@@ -145,7 +157,7 @@ function M.calculate_tokens(opts)
   local prompt_opts = M.generate_prompts(opts)
   local tokens = Utils.tokens.calculate_tokens(prompt_opts.system_prompt)
   for _, message in ipairs(prompt_opts.messages) do
-    tokens = tokens + Utils.tokens.calculate_tokens(message.content)
+    tokens = tokens + Utils.tokens.calculate_message_content_tokens(message.content)
   end
   return tokens
 end
@@ -201,8 +213,28 @@ function M._stream(opts)
       if stop_opts.reason == "rate_limit" then
         local msg = "Rate limit reached. Retrying in " .. stop_opts.retry_after .. " seconds ..."
         opts.on_chunk("\n*[" .. msg .. "]*\n")
+        local timer = vim.loop.new_timer()
+        if timer then
+          local retry_after = stop_opts.retry_after
+          local function countdown()
+            timer:start(
+              1000,
+              0,
+              vim.schedule_wrap(function()
+                if retry_after > 0 then retry_after = retry_after - 1 end
+                local msg_ = "Rate limit reached. Retrying in " .. retry_after .. " seconds ..."
+                opts.on_chunk([[\033[1A\033[K]] .. "\n*[" .. msg_ .. "]*\n")
+                countdown()
+              end)
+            )
+          end
+          countdown()
+        end
         Utils.info("Rate limit reached. Retrying in " .. stop_opts.retry_after .. " seconds", { title = "Avante" })
-        vim.defer_fn(function() M._stream(opts) end, stop_opts.retry_after * 1000)
+        vim.defer_fn(function()
+          if timer then timer:stop() end
+          M._stream(opts)
+        end, stop_opts.retry_after * 1000)
         return
       end
       return opts.on_stop(stop_opts)
