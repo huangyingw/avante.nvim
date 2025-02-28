@@ -2147,20 +2147,41 @@ end
 
 function Sidebar:clear_history(args, cb)
   local chat_history = Path.history.load(self.code.bufnr)
-  if next(chat_history) ~= nil then
-    chat_history = {}
-    Path.history.save(self.code.bufnr, chat_history)
+  -- 强制清空历史
+  chat_history = {}
+  Path.history.save(self.code.bufnr, chat_history)
+  
+  -- 强制清空结果窗口内容，同时确保缓冲区是可修改的
+  if self.result_container and self.result_container.bufnr and vim.api.nvim_buf_is_valid(self.result_container.bufnr) then
+    -- 先检查并保存当前modifiable状态
+    local modifiable = vim.api.nvim_buf_get_option(self.result_container.bufnr, "modifiable")
+    
+    -- 暂时设置为可修改
+    if not modifiable then
+      vim.api.nvim_buf_set_option(self.result_container.bufnr, "modifiable", true)
+    end
+    
+    -- 清空内容
+    vim.api.nvim_buf_set_lines(self.result_container.bufnr, 0, -1, false, {})
+    
+    -- 恢复原有的modifiable状态
+    if not modifiable then
+      vim.api.nvim_buf_set_option(self.result_container.bufnr, "modifiable", false)
+    end
+  end
+  
+  -- 使用安全的方式更新内容
+  pcall(function()
     self:update_content(
       "Chat history cleared",
       { focus = false, scroll = false, callback = function() self:focus_input() end }
     )
-    if cb then cb(args) end
-  else
-    self:update_content(
-      "Chat history is already empty",
-      { focus = false, scroll = false, callback = function() self:focus_input() end }
-    )
-  end
+  end)
+  
+  -- 强制刷新UI
+  vim.cmd("redraw!")
+  
+  if cb then cb(args) end
 end
 
 function Sidebar:reset_memory(args, cb)

@@ -153,42 +153,19 @@ vim.api.nvim_create_autocmd("FileType", {
   pattern = "AvanteInput",
   callback = function()
     vim.keymap.set({"n", "i"}, "<C-v>", function()
-      -- 首先尝试获取普通剪贴板内容
-      local clipboard = vim.fn.getreg('+')
-
-      -- 如果剪贴板有普通文本内容，直接执行普通粘贴
-      if clipboard ~= "" then
-        vim.notify("执行普通文本粘贴", vim.log.levels.INFO)
-        vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-v>", true, true, true), "n", true)
-        return
-      end
-
-      -- 尝试加载 img-clip
-      local ok, img_clip = pcall(require, "img-clip")
-      if not ok then
-        vim.notify("Failed to load img-clip: " .. tostring(img_clip), vim.log.levels.ERROR)
-        vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-v>", true, true, true), "n", true)
-        return
-      end
-
-      -- 尝试粘贴图片
-      local result = img_clip.paste_image({
-        dir_path = image_save_path,
-        use_absolute_path = true,
-        show_notification = true,
-        file_name = os.date("%Y-%m-%d-%H-%M-%S") .. "_" .. tostring(os.clock()):gsub("%.", "") .. ".png",
-        on_error = function(err)
-          vim.notify("不是图片内容，执行普通粘贴", vim.log.levels.INFO)
-          vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-v>", true, true, true), "n", true)
-        end,
-        on_success = function(path)
-          vim.notify("成功粘贴图片: " .. path, vim.log.levels.INFO)
-        end,
-      })
-
+      -- 使用修改好的handle_paste函数
+      local clipboard = require("avante.clipboard")
+      local result = clipboard.handle_paste()
+      
+      -- 如果处理失败，尝试执行普通粘贴
       if not result then
-        vim.notify("尝试普通粘贴", vim.log.levels.INFO)
-        vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-v>", true, true, true), "n", true)
+        vim.notify("自定义粘贴处理失败，尝试普通粘贴", vim.log.levels.INFO)
+        local mode = vim.api.nvim_get_mode().mode
+        if mode == "i" then
+          vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-r>+", true, false, true), "n", true)
+        elseif mode == "n" or mode == "v" or mode == "V" then
+          vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('"+p', true, false, true), "n", true)
+        end
       end
     end, { buffer = true, noremap = true })
   end,
@@ -241,7 +218,24 @@ if vim.fn.has('mac') == 1 then
 
   -- 修改图片粘贴映射，添加调试输出
   vim.api.nvim_set_keymap('i', '<D-v>',
-    [[<Cmd>lua print("Cmd-V triggered"); if vim.bo.filetype == 'AvanteInput' then local ok, res = pcall(require('avante.clipboard').paste_image); print("Paste result:", ok, res) end<CR>]],
+    [[<Cmd>lua print("Cmd-V triggered"); require('avante.clipboard').handle_paste()<CR>]],
+    { noremap = true, silent = false })
+  vim.api.nvim_set_keymap('n', '<D-v>',
+    [[<Cmd>lua print("Cmd-V triggered (normal)"); require('avante.clipboard').handle_paste()<CR>]],
+    { noremap = true, silent = false })
+  vim.api.nvim_set_keymap('v', '<D-v>',
+    [[<Cmd>lua print("Cmd-V triggered (visual)"); require('avante.clipboard').handle_paste()<CR>]],
+    { noremap = true, silent = false })
+
+  -- Ctrl+V 作为备选快捷键
+  vim.api.nvim_set_keymap('i', '<C-v>',
+    [[<Cmd>lua print("Ctrl-V triggered"); require('avante.clipboard').handle_paste()<CR>]],
+    { noremap = true, silent = false })
+  vim.api.nvim_set_keymap('n', '<C-v>',
+    [[<Cmd>lua print("Ctrl-V triggered (normal)"); require('avante.clipboard').handle_paste()<CR>]],
+    { noremap = true, silent = false })
+  vim.api.nvim_set_keymap('v', '<C-v>',
+    [[<Cmd>lua print("Ctrl-V triggered (visual)"); require('avante.clipboard').handle_paste()<CR>]],
     { noremap = true, silent = false })
 
   -- 为所有新创建的 buffer 添加映射
@@ -251,7 +245,24 @@ if vim.fn.has('mac') == 1 then
       local bufnr = vim.api.nvim_get_current_buf()
       -- 为特定 buffer 设置映射
       vim.api.nvim_buf_set_keymap(bufnr, 'i', '<D-v>', 
-        [[<Cmd>lua print("Buffer-specific Cmd-V triggered"); if vim.bo.filetype == 'AvanteInput' then require('avante.clipboard').paste_image() end<CR>]], 
+        [[<Cmd>lua print("Buffer-specific Cmd-V triggered"); require('avante.clipboard').handle_paste()<CR>]], 
+        { noremap = true, silent = false })
+      vim.api.nvim_buf_set_keymap(bufnr, 'n', '<D-v>', 
+        [[<Cmd>lua print("Buffer-specific Cmd-V triggered (normal)"); require('avante.clipboard').handle_paste()<CR>]], 
+        { noremap = true, silent = false })
+      vim.api.nvim_buf_set_keymap(bufnr, 'v', '<D-v>', 
+        [[<Cmd>lua print("Buffer-specific Cmd-V triggered (visual)"); require('avante.clipboard').handle_paste()<CR>]], 
+        { noremap = true, silent = false })
+      
+      -- 同样为Ctrl+V设置映射
+      vim.api.nvim_buf_set_keymap(bufnr, 'i', '<C-v>', 
+        [[<Cmd>lua print("Buffer-specific Ctrl-V triggered"); require('avante.clipboard').handle_paste()<CR>]], 
+        { noremap = true, silent = false })
+      vim.api.nvim_buf_set_keymap(bufnr, 'n', '<C-v>', 
+        [[<Cmd>lua print("Buffer-specific Ctrl-V triggered (normal)"); require('avante.clipboard').handle_paste()<CR>]], 
+        { noremap = true, silent = false })
+      vim.api.nvim_buf_set_keymap(bufnr, 'v', '<C-v>', 
+        [[<Cmd>lua print("Buffer-specific Ctrl-V triggered (visual)"); require('avante.clipboard').handle_paste()<CR>]], 
         { noremap = true, silent = false })
     end
   })

@@ -217,14 +217,25 @@ end
 function P.available() return P._init_templates_lib() ~= nil end
 
 function P.clear()
-  P.cache_path:rm({ recursive = true })
-  P.history_path:rm({ recursive = true })
+  -- 添加强制删除和刷新
+  if P.cache_path:exists() then
+    P.cache_path:rm({ recursive = true })
+  end
+  if P.history_path:exists() then
+    P.history_path:rm({ recursive = true })
+  end
+
+  -- 强制刷新，确保目录被删除
+  vim.cmd("sleep 10m")
 
   if not P.cache_path:exists() then P.cache_path:mkdir({ parents = true }) end
   if not P.history_path:exists() then P.history_path:mkdir({ parents = true }) end
   
-  -- Clear the history file cache
+  -- 清除历史文件缓存
   history_file_cache = LRUCache:new(12)
+  
+  -- 强制通知用户
+  Utils.info("缓存和历史记录已清除")
 end
 
 return P

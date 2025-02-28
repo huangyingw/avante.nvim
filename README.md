@@ -798,6 +798,7 @@ brew install rust
 brew install pngpaste
 
 帮我设计一个二分查找算法.
+帮我解决这个问题.
 还能再优化吗?
 /Users/huangyingw/.local/share/nvim/avante/images/2024-11-15-18-22-50.png
 请描述一下这张图片的内容：/Users/huangyingw/.local/share/nvim/avante/images/2024-11-15-18-22-50.png

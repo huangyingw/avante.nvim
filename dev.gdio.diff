@@ -1,54 +1,96 @@
+diff --git a/Makefile b/Makefile
+--- ./Makefile
++++ ./Makefile
+@@ -49,6 +49,8 @@ define build_package
+ $1-$2:
+ 	cargo build --release --features=$1 -p avante-$2
+ 	cp target/release/libavante_$(shell echo $2 | tr - _).$(EXT) $(BUILD_DIR)/avante_$(shell echo $2 | tr - _).$(EXT)
++	@mkdir -p lua/avante
++	cp $(BUILD_DIR)/avante_$(shell echo $2 | tr - _).$(EXT) lua/avante/
+ endef
+ 
+ define build_targets
+diff --git a/build.sh b/build.sh
+old mode 100644
+new mode 100755
+diff --git a/lua/avante/clipboard.lua b/lua/avante/clipboard.lua
+--- ./lua/avante/clipboard.lua
++++ ./lua/avante/clipboard.lua
+@@ -4,6 +4,7 @@
+ local Path = require("plenary.path")
+ local Utils = require("avante.utils")
+ local Config = require("avante.config")
++local Logger = require("avante.logger")
+ ---@module "img-clip"
+ local ImgClip = nil
+ 
+@@ -55,19 +56,34 @@ end
+ ---@param filepath string
+ function M.get_base64_content(filepath)
+   local os_mapping = Utils.get_os_name()
++
+   ---@type vim.SystemCompleted
+   local output
++  local cmd
+   if os_mapping == "darwin" or os_mapping == "linux" then
+-    output = Utils.shell_run(("cat %s | base64 | tr -d '\n'"):format(filepath))
++    cmd = ("cat %s | base64 | tr -d '\n'"):format(filepath)
+   else
+-    output =
+-      Utils.shell_run(("([Convert]::ToBase64String([IO.File]::ReadAllBytes('%s')) -replace '`r`n')"):format(filepath))
++    cmd = ("([Convert]::ToBase64String([IO.File]::ReadAllBytes('%s')) -replace '`r`n')"):format(filepath)
+   end
++
++  Logger.write_log("Running command: " .. cmd)
++  output = Utils.shell_run(cmd)
++  Logger.write_log("Command exit code: " .. output.code)
++
+   if output.code == 0 then
++    Logger.write_log("Base64 length: " .. #output.stdout)
+     return output.stdout
+   else
++    Logger.write_log("Error: " .. (output.stderr or "unknown error"))
+     error("Failed to convert image to base64")
+   end
+ end
+ 
++M.get_paste_status = function()
++  if vim.bo.filetype == 'AvanteInput' then
++    return "Paste Mode: Image Ready"
++  end
++  return ""
++end
++
+ return M
 diff --git a/lua/avante/config.lua b/lua/avante/config.lua
 --- ./lua/avante/config.lua
 +++ ./lua/avante/config.lua
-@@ -28,7 +28,7 @@ M.defaults = {
-   ---@type AvanteSupportedProvider
-   copilot = {
-     endpoint = "https://api.githubcopilot.com",
--    model = "gpt-4o-2024-08-06",
-+    model = "gpt-4o-2024-05-13",
-     proxy = nil, -- [protocol://]host[:port] Use this proxy
-     allow_insecure = false, -- Allow insecure server connections
-     timeout = 30000, -- Timeout in milliseconds
-@@ -47,10 +47,10 @@ M.defaults = {
+@@ -188,10 +188,10 @@ M._defaults = {
    ---@type AvanteSupportedProvider
    claude = {
-       endpoint = "https://api.anthropic.com",
--    model = "claude-3-5-sonnet-20241022",
-+      model = "claude-3-haiku-20240307",
-       timeout = 30000, -- Timeout in milliseconds
-       temperature = 0,
+     endpoint = "https://api.anthropic.com",
+-    model = "claude-3-7-sonnet-20250219",
++    model = "claude-3-haiku-20240307",
+     timeout = 30000, -- Timeout in milliseconds
+     temperature = 0,
 -    max_tokens = 8000,
-+      max_tokens = 4098,
-     },
++    max_tokens = 4096,
+   },
    ---@type AvanteSupportedProvider
-   gemini = {
-diff --git a/lua/avante/llm.lua b/lua/avante/llm.lua
---- ./lua/avante/llm.lua
-+++ ./lua/avante/llm.lua
-@@ -8,6 +8,7 @@ local Utils = require("avante.utils")
- local Config = require("avante.config")
- local Path = require("avante.path")
- local P = require("avante.providers")
-+local Logger = require("avante.logger")
+   bedrock = {
+diff --git a/lua/avante/path.lua b/lua/avante/path.lua
+--- ./lua/avante/path.lua
++++ ./lua/avante/path.lua
+@@ -234,6 +234,9 @@ function P.clear()
  
- ---@class avante.LLM
- local M = {}
-@@ -197,6 +198,14 @@ M._stream = function(opts, Provider)
-       opts.on_complete(nil)
-     end,
-     callback = function(result)
-+      Logger.debug_response({
-+        event = "curl_callback",
-+        status = result.status,
-+        headers = result.headers,
-+        body_size = result.body and #result.body or 0,
-+        body = result.body
-+      })
-+
-       active_job = nil
-       cleanup()
-       if result.status >= 400 then
+   if not P.cache_path:exists() then P.cache_path:mkdir({ parents = true }) end
+   if not P.history_path:exists() then P.history_path:mkdir({ parents = true }) end
++  
++  -- Clear the history file cache
++  history_file_cache = LRUCache:new(12)
+ end
+ 
+ return P
 diff --git a/lua/avante/providers/claude.lua b/lua/avante/providers/claude.lua
 --- ./lua/avante/providers/claude.lua
 +++ ./lua/avante/providers/claude.lua
@@ -58,281 +100,70 @@ diff --git a/lua/avante/providers/claude.lua b/lua/avante/providers/claude.lua
  local P = require("avante.providers")
 +local Logger = require("avante.logger")
  
- ---@class AvanteClaudeBaseMessage
- ---@field cache_control {type: "ephemeral"}?
-@@ -78,13 +79,6 @@ M.parse_messages = function(opts)
- end
- 
- M.parse_response = function(data_stream, event_state, opts)
--  if event_state == nil then
--    if data_stream:match('"content_block_delta"') then
--      event_state = "content_block_delta"
--    elseif data_stream:match('"message_stop"') then
--      event_state = "message_stop"
--    end
--  end
-   if event_state == "content_block_delta" then
-     local ok, json = pcall(vim.json.decode, data_stream)
-     if not ok then return end
-@@ -113,12 +107,8 @@ M.parse_curl_args = function(provider, prompt_opts)
- 
-   local messages = M.parse_messages(prompt_opts)
- 
--  return {
--    url = Utils.url_join(base.endpoint, "/v1/messages"),
--    proxy = base.proxy,
--    insecure = base.allow_insecure,
--    headers = headers,
--    body = vim.tbl_deep_extend("force", {
-+  local url = Utils.trim(base.endpoint, { suffix = "/" }) .. "/v1/messages"
-+  local body = vim.tbl_deep_extend("force", {
-       model = base.model,
-       system = {
-         {
-@@ -129,7 +119,16 @@ M.parse_curl_args = function(provider, prompt_opts)
-       },
-       messages = messages,
-       stream = true,
--    }, body_opts),
-+   }, body_opts)
-+
-+  Logger.debug_request(url, headers, body)
-+
-+  return {
-+    url = url,
-+    proxy = base.proxy,
-+    insecure = base.allow_insecure,
-+    headers = headers,
-+    body = body,
-   }
- end
- 
-diff --git a/lua/avante/providers/copilot.lua b/lua/avante/providers/copilot.lua
---- ./lua/avante/providers/copilot.lua
-+++ ./lua/avante/providers/copilot.lua
-@@ -79,7 +79,7 @@ H.get_oauth_token = function()
- end
- 
- H.chat_auth_url = "https://api.github.com/copilot_internal/v2/token"
--H.chat_completion_url = function(base_url) return Utils.url_join(base_url, "/chat/completions") end
-+H.chat_completion_url = function(base_url) return Utils.trim(base_url, { prefix = "/" }) .. "/chat/completions" end
- 
- ---@class AvanteProviderFunctor
- local M = {}
-diff --git a/lua/avante/providers/init.lua b/lua/avante/providers/init.lua
---- ./lua/avante/providers/init.lua
-+++ ./lua/avante/providers/init.lua
-@@ -161,8 +161,6 @@ end
- ---@param opts {refresh: boolean, provider: AvanteProviderFunctor}
- ---@private
- E.setup = function(opts)
--  opts.provider.setup()
--
-   local var = opts.provider.api_key_name
- 
-   if var == nil or var == "" then
-@@ -170,6 +168,8 @@ E.setup = function(opts)
-     return
+ ---@param tool AvanteLLMTool
+ ---@return AvanteClaudeTool
+@@ -232,7 +233,6 @@ function M.parse_response(ctx, data_stream, event_state, opts)
+         tool_use_list = tool_use_list,
+       })
+     end
+-    return
+   elseif event_state == "error" then
+     opts.on_stop({ reason = "error", error = vim.json.decode(data_stream) })
    end
+@@ -306,4 +306,9 @@ function M.on_error(result)
+   Utils.error(error_msg, { once = true, title = "Avante" })
+ end
  
-+  opts.provider.setup()
++M.support_paste_image = function()
++  local supported = Config.support_paste_image()
++  return supported
++end
 +
-   -- check if var is a all caps string
-   if type(var) == "table" or var:match("^cmd:(.*)") then return end
- 
+ return M
 diff --git a/lua/avante/sidebar.lua b/lua/avante/sidebar.lua
 --- ./lua/avante/sidebar.lua
 +++ ./lua/avante/sidebar.lua
-@@ -1099,7 +1099,7 @@ local function get_timestamp() return os.date("%Y-%m-%d %H:%M:%S") end
- ---@param provider string
- ---@param model string
- ---@param request string
-----@param selected_file {filepath: string}?
-+---@param selected_file {filepath: string, content: string}?
- ---@param selected_code {filetype: string, content: string}?
- ---@return string
- local function render_chat_record_prefix(timestamp, provider, model, request, selected_file, selected_code)
-@@ -1207,10 +1207,10 @@ function Sidebar:get_content_between_separators()
-   return content, start_line
+@@ -439,10 +439,9 @@ local spinner_chars = {
+   "⢰",
+   "⣰",
+   "⢴",
+-  "⢲",
+   "⢱",
+   "⢸",
+-  "⣸",
++  "⣹",
+   "⢼",
+   "⢺",
+   "⢹",
+@@ -1748,7 +1747,7 @@ function Sidebar:on_mount(opts)
+   })
+ 
+   self:render_result()
+-  self:render_input(opts.ask)
++  self:render_input(opts)
+   self:render_selected_code()
+ 
+   local filetype = api.nvim_get_option_value("filetype", { buf = self.code.bufnr })
+@@ -1890,6 +1889,8 @@ function Sidebar:initialize()
+   self.file_selector:reset()
+   self.file_selector:add_selected_file(filepath)
+ 
++  self:refresh_winids()
++
+   return self
  end
  
-----@alias AvanteSlashCommandType "clear" | "help" | "lines" | "reset"
-----@alias AvanteSlashCommandCallback fun(args: string, cb?: fun(args: string): nil): nil
-----@alias AvanteSlashCommand {description: string, command: AvanteSlashCommandType, details: string, shorthelp?: string, callback?: AvanteSlashCommandCallback}
-----@return AvanteSlashCommand[]
-+---@alias AvanteSlashCommands "clear" | "help" | "lines" | "reset"
-+---@alias AvanteSlashCallback fun(args: string, cb?: fun(args: string): nil): nil
-+---@alias AvanteSlash {description: string, command: AvanteSlashCommands, details: string, shorthelp?: string, callback?: AvanteSlashCallback}
-+---@return AvanteSlash[]
- function Sidebar:get_commands()
-   ---@param items_ {command: string, description: string, shorthelp?: string}[]
-   ---@return string
-@@ -1222,7 +1222,7 @@ function Sidebar:get_commands()
-     return help_text
-   end
- 
--  ---@type AvanteSlashCommand[]
-+  ---@type AvanteSlash[]
-   local items = {
-     { description = "Show help message", command = "help" },
-     { description = "Clear chat history", command = "clear" },
-@@ -1234,7 +1234,7 @@ function Sidebar:get_commands()
-     },
-   }
- 
--  ---@type {[AvanteSlashCommandType]: AvanteSlashCommandCallback}
-+  ---@type {[AvanteSlashCommands]: AvanteSlashCallback}
-   local cbs = {
-     help = function(args, cb)
-       local help_text = get_help_text(items)
-@@ -1282,7 +1282,7 @@ function Sidebar:get_commands()
-   return vim
-     .iter(items)
-     :map(
--      ---@param item AvanteSlashCommand
-+      ---@param item AvanteSlash
-       function(item)
-         return {
-           command = item.command,
-@@ -1377,7 +1377,7 @@ function Sidebar:create_input(opts)
-         return
-       end
-       local cmds = self:get_commands()
--      ---@type AvanteSlashCommand
-+      ---@type AvanteSlash
-       local cmd = vim.iter(cmds):filter(function(_) return _.command == command end):totable()[1]
-       if cmd then
-         if command == "lines" then
-@@ -1594,10 +1594,7 @@ function Sidebar:create_input(opts)
-     callback = function()
-       local has_cmp, cmp = pcall(require, "cmp")
-       if has_cmp then
--        cmp.register_source(
--          "avante_commands",
--          require("cmp_avante.commands").new(self:get_commands(), self.input.bufnr)
--        )
-+        cmp.register_source("avante_commands", require("cmp_avante.commands").new(self))
-         cmp.register_source(
-           "avante_mentions",
-           require("cmp_avante.mentions").new(Utils.get_mentions(), self.input.bufnr)
-@@ -1613,6 +1610,24 @@ function Sidebar:create_input(opts)
+@@ -2850,6 +2851,13 @@ function Sidebar:create_input_container(opts)
      end,
    })
  
-+  -- Unregister completion
-+  api.nvim_create_autocmd("BufLeave", {
-+    group = self.augroup,
-+    buffer = self.input.bufnr,
-+    once = false,
-+    desc = "Unregister the completion of helpers in the input buffer",
-+    callback = function()
-+      local has_cmp, cmp = pcall(require, "cmp")
-+      if has_cmp then
-+        for _, source in ipairs(cmp.core:get_sources()) do
-+          if source.name == "avante_commands" or source.name == "avante_mentions" then
-+            cmp.unregister_source(source.id)
-+          end
-+        end
-+      end
-+    end,
-+  })
++  -- 在 input buffer 创建后添加映射
++  if vim.fn.has('mac') == 1 then
++    vim.api.nvim_buf_set_keymap(self.input_container.bufnr, 'i', '<D-v>', 
++      [[<Cmd>lua require('avante.clipboard').paste_image()<CR>]], 
++      { noremap = true, silent = false })
++  end
 +
-   -- Close the floating window
-   local function close_hint()
-     if hint_window and api.nvim_win_is_valid(hint_window) then
-@@ -1780,16 +1795,6 @@ function Sidebar:render(opts)
-     xpcall(function() api.nvim_buf_set_name(self.result.bufnr, RESULT_BUF_NAME) end, function(_) end)
-   end)
- 
--  self.result:map("n", "q", function()
--    Llm.cancel_inflight_request()
--    self:close()
--  end)
--
--  self.result:map("n", "<Esc>", function()
--    Llm.cancel_inflight_request()
--    self:close()
--  end)
--
-   self:create_input(opts)
- 
-   self:update_content_with_history(chat_history)
-diff --git a/lua/cmp_avante/commands.lua b/lua/cmp_avante/commands.lua
---- ./lua/cmp_avante/commands.lua
-+++ ./lua/cmp_avante/commands.lua
-@@ -1,21 +1,16 @@
--local api = vim.api
--
- ---@class commands_source
-----@field commands AvanteSlashCommand[]
-----@field bufnr integer
-+---@field sidebar avante.Sidebar
- local commands_source = {}
- 
-----@param commands AvanteSlashCommand[]
-----@param bufnr integer
--function commands_source.new(commands, bufnr)
-+---@param sidebar avante.Sidebar
-+function commands_source.new(sidebar)
-   ---@type cmp.Source
-   return setmetatable({
--    commands = commands,
--    bufnr = bufnr,
-+    sidebar = sidebar,
-   }, { __index = commands_source })
+   self:refresh_winids()
  end
  
--function commands_source:is_available() return api.nvim_get_current_buf() == self.bufnr end
-+function commands_source:is_available() return vim.bo.filetype == "AvanteInput" end
- 
- commands_source.get_position_encoding_kind = function() return "utf-8" end
- 
-@@ -28,7 +23,9 @@ function commands_source:complete(_, callback)
- 
-   local items = {}
- 
--  for _, command in ipairs(self.commands) do
-+  local commands = self.sidebar:get_commands()
-+
-+  for _, command in ipairs(commands) do
-     table.insert(items, {
-       label = "/" .. command.command,
-       kind = kind,
-diff --git a/lua/cmp_avante/mentions.lua b/lua/cmp_avante/mentions.lua
---- ./lua/cmp_avante/mentions.lua
-+++ ./lua/cmp_avante/mentions.lua
-@@ -1,5 +1,3 @@
--local api = vim.api
--
- ---@class mentions_source
- ---@field mentions {description: string, command: AvanteMentions, details: string, shorthelp?: string, callback?: AvanteMentionCallback}[]
- ---@field bufnr integer
-@@ -15,7 +13,7 @@ function mentions_source.new(mentions, bufnr)
-   }, { __index = mentions_source })
- end
- 
--function mentions_source:is_available() return api.nvim_get_current_buf() == self.bufnr end
-+function mentions_source:is_available() return vim.api.nvim_get_current_buf() == self.bufnr end
- 
- mentions_source.get_position_encoding_kind = function() return "utf-8" end
- 
-diff --git a/neovim/init.lua b/neovim/init.lua
-new file mode 100644
---- /dev/null
-+++ ./neovim/init.lua
-@@ -0,0 +1,15 @@
-+-- init.lua
-+vim.cmd 'set runtimepath^=~/.vim runtimepath+=~/.vim/after'
-+vim.cmd 'let &packpath = &runtimepath'
-+
-+-- 禁用终端的 GUI 颜色支持
-+vim.o.termguicolors = false
-+
-+-- 设置当前的颜色方案为 'vim'
-+vim.cmd('colorscheme vim')
-+
-+vim.cmd 'source ~/.vimrc'
-+
-+require('plugins')
-+require('keymaps')
-+require('nvim_molten_config')
