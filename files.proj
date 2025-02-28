@@ -1,4 +1,5 @@
 "./.cargo/config.toml"
+"./.config/nvim/diff.lua"
 "./.config/nvim/init.lua"
 "./.cursorrules"
 "./.dockerignore"
