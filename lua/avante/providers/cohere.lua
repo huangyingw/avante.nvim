@@ -62,15 +62,15 @@ M.parse_stream_data = function(data, opts)
   local json = vim.json.decode(data)
   if json.type ~= nil then
     if json.type == "message-end" and json.delta.finish_reason == "COMPLETE" then
-      opts.on_complete(nil)
+      opts.on_stop({ reason = "complete" })
       return
     end
     if json.type == "content-delta" then opts.on_chunk(json.delta.message.content.text) end
   end
 end
 
-M.parse_curl_args = function(provider, code_opts)
-  local base, body_opts = P.parse_config(provider)
+M.parse_curl_args = function(provider, prompt_opts)
+  local provider_conf, request_body = P.parse_config(provider)
 
   local headers = {
     ["Accept"] = "application/json",
@@ -82,17 +82,17 @@ M.parse_curl_args = function(provider, code_opts)
       .. "."
       .. vim.version().patch,
   }
-  if P.env.require_api_key(base) then headers["Authorization"] = "Bearer " .. provider.parse_api_key() end
+  if P.env.require_api_key(provider_conf) then headers["Authorization"] = "Bearer " .. provider.parse_api_key() end
 
   return {
-    url = Utils.url_join(base.endpoint, "/chat"),
-    proxy = base.proxy,
-    insecure = base.allow_insecure,
+    url = Utils.url_join(provider_conf.endpoint, "/chat"),
+    proxy = provider_conf.proxy,
+    insecure = provider_conf.allow_insecure,
     headers = headers,
     body = vim.tbl_deep_extend("force", {
-      model = base.model,
+      model = provider_conf.model,
       stream = true,
-    }, M.parse_messages(code_opts), body_opts),
+    }, M.parse_messages(prompt_opts), request_body),
   }
 end
 

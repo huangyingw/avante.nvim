@@ -7,7 +7,6 @@ local lsp = vim.lsp
 ---@class avante.utils: LazyUtilCore
 ---@field tokens avante.utils.tokens
 ---@field root avante.utils.root
----@field repo_map avante.utils.repo_map
 ---@field file avante.utils.file
 local M = {}
 
@@ -47,6 +46,31 @@ M.get_os_name = function()
   end
 end
 
+M.get_system_info = function()
+  local os_name = vim.loop.os_uname().sysname
+  local os_version = vim.loop.os_uname().release
+  local os_machine = vim.loop.os_uname().machine
+  local lang = os.getenv("LANG")
+
+  local res = string.format(
+    "- Platform: %s-%s-%s\n- Shell: %s\n- Language: %s\n- Current date: %s",
+    os_name,
+    os_version,
+    os_machine,
+    vim.o.shell,
+    lang,
+    os.date("%Y-%m-%d")
+  )
+
+  local project_root = M.root.get()
+  if project_root then res = res .. string.format("\n- Project root: %s", project_root) end
+
+  local is_git_repo = vim.fn.isdirectory(".git") == 1
+  if is_git_repo then res = res .. "\n- The user is operating inside a git repository" end
+
+  return res
+end
+
 --- This function will run given shell command synchronously.
 ---@param input_cmd string
 ---@return vim.SystemCompleted
@@ -58,17 +82,17 @@ M.shell_run = function(input_cmd)
   -- powershell then we can just run the cmd
   if shell:match("powershell") or shell:match("pwsh") then
     cmd = input_cmd
-  elseif vim.fn.has("wsl") > 0 then
+  elseif fn.has("wsl") > 0 then
     -- wsl: powershell.exe -Command 'command "/path"'
     cmd = "powershell.exe -NoProfile -Command '" .. input_cmd:gsub("'", '"') .. "'"
-  elseif vim.fn.has("win32") > 0 then
+  elseif fn.has("win32") > 0 then
     cmd = 'powershell.exe -NoProfile -Command "' .. input_cmd:gsub('"', "'") .. '"'
   else
     -- linux and macos we wil just do sh -c
-    cmd = "sh -c " .. vim.fn.shellescape(input_cmd)
+    cmd = "sh -c " .. fn.shellescape(input_cmd)
   end
 
-  local output = vim.fn.system(cmd)
+  local output = fn.system(cmd)
   local code = vim.v.shell_error
 
   return { stdout = output, code = code }
@@ -153,12 +177,12 @@ end
 ---@param str string
 ---@param opts? {suffix?: string, prefix?: string}
 function M.trim(str, opts)
-  if not opts then return str end
   local res = str
+  if not opts then return res end
   if opts.suffix then
-    res = str:sub(#str - #opts.suffix + 1) == opts.suffix and str:sub(1, #str - #opts.suffix) or str
+    res = res:sub(#res - #opts.suffix + 1) == opts.suffix and res:sub(1, #res - #opts.suffix) or res
   end
-  if opts.prefix then res = str:sub(1, #opts.prefix) == opts.prefix and str:sub(#opts.prefix + 1) or str end
+  if opts.prefix then res = res:sub(1, #opts.prefix) == opts.prefix and res:sub(#opts.prefix + 1) or res end
   return res
 end
 
@@ -190,7 +214,7 @@ function M.get_visual_selection_and_range()
     start_col, end_col = end_col, start_col
   end
   local content = "" -- luacheck: ignore
-  local range = Range.new({ line = start_line, col = start_col }, { line = end_line, col = end_col })
+  local range = Range:new({ lnum = start_line, col = start_col }, { lnum = end_line, col = end_col })
   -- Check if it's a single-line selection
   if start_line == end_line then
     -- Get partial content of a single line
@@ -213,7 +237,7 @@ function M.get_visual_selection_and_range()
   end
   if not content then return nil end
   -- Return the selected content and range
-  return SelectionResult.new(content, range)
+  return SelectionResult:new(content, range)
 end
 
 ---Wrapper around `api.nvim_buf_get_lines` which defaults to the current buffer
@@ -259,15 +283,7 @@ end
 
 ---@param path string
 ---@return string
-function M.norm(path)
-  if path:sub(1, 1) == "~" then
-    local home = vim.uv.os_homedir()
-    if home:sub(-1) == "\\" or home:sub(-1) == "/" then home = home:sub(1, -2) end
-    path = home .. path:sub(2)
-  end
-  path = path:gsub("\\", "/"):gsub("/+", "/")
-  return path:sub(-1) == "/" and path:sub(1, -2) or path
-end
+function M.norm(path) return vim.fs.normalize(path) end
 
 ---@param msg string|string[]
 ---@param opts? LazyNotifyOpts
@@ -331,7 +347,7 @@ function M.warn(msg, opts)
 end
 
 function M.debug(...)
-  if not require("avante.config").options.debug then return end
+  if not require("avante.config").debug then return end
 
   local args = { ... }
   if #args == 0 then return end
@@ -463,6 +479,8 @@ function M.url_join(...)
     ::continue::
   end
 
+  if result:sub(-1) == "/" then result = result:sub(1, -2) end
+
   return result
 end
 
@@ -562,10 +580,10 @@ function M.debounce(func, delay)
 end
 
 function M.winline(winid)
-  local current_win = vim.api.nvim_get_current_win()
-  vim.api.nvim_set_current_win(winid)
-  local line = vim.fn.winline()
-  vim.api.nvim_set_current_win(current_win)
+  local current_win = api.nvim_get_current_win()
+  api.nvim_set_current_win(winid)
+  local line = fn.winline()
+  api.nvim_set_current_win(current_win)
   return line
 end
 
@@ -628,10 +646,11 @@ function M.parse_gitignore(gitignore_path)
   end
 
   file:close()
+  ignore_patterns = vim.list_extend(ignore_patterns, { "%.git", "%.worktree", "__pycache__", "node_modules" })
   return ignore_patterns, negate_patterns
 end
 
-local function is_ignored(file, ignore_patterns, negate_patterns)
+function M.is_ignored(file, ignore_patterns, negate_patterns)
   for _, pattern in ipairs(negate_patterns) do
     if file:match(pattern) then return false end
   end
@@ -641,21 +660,57 @@ local function is_ignored(file, ignore_patterns, negate_patterns)
   return false
 end
 
-function M.scan_directory(directory, ignore_patterns, negate_patterns)
+---@param options { directory: string, add_dirs?: boolean, depth?: integer }
+function M.scan_directory_respect_gitignore(options)
+  local directory = options.directory
+  local gitignore_path = directory .. "/.gitignore"
+  local gitignore_patterns, gitignore_negate_patterns = M.parse_gitignore(gitignore_path)
+  return M.scan_directory({
+    directory = directory,
+    gitignore_patterns = gitignore_patterns,
+    gitignore_negate_patterns = gitignore_negate_patterns,
+    add_dirs = options.add_dirs,
+    depth = options.depth,
+  })
+end
+
+---@param options { directory: string, gitignore_patterns: string[], gitignore_negate_patterns: string[], add_dirs?: boolean, depth?: integer, current_depth?: integer }
+function M.scan_directory(options)
+  local directory = options.directory
+  local ignore_patterns = options.gitignore_patterns
+  local negate_patterns = options.gitignore_negate_patterns
+  local add_dirs = options.add_dirs or false
+  local depth = options.depth or -1
+  local current_depth = options.current_depth or 0
+
   local files = {}
   local handle = vim.loop.fs_scandir(directory)
 
   if not handle then return files end
 
   while true do
+    if depth > 0 and current_depth >= depth then break end
+
     local name, type = vim.loop.fs_scandir_next(handle)
     if not name then break end
 
     local full_path = directory .. "/" .. name
     if type == "directory" then
-      vim.list_extend(files, M.scan_directory(full_path, ignore_patterns, negate_patterns))
+      if add_dirs and not M.is_ignored(full_path, ignore_patterns, negate_patterns) then
+        table.insert(files, full_path)
+      end
+      vim.list_extend(
+        files,
+        M.scan_directory({
+          directory = full_path,
+          gitignore_patterns = ignore_patterns,
+          gitignore_negate_patterns = negate_patterns,
+          add_dirs = add_dirs,
+          current_depth = current_depth + 1,
+        })
+      )
     elseif type == "file" then
-      if not is_ignored(full_path, ignore_patterns, negate_patterns) then table.insert(files, full_path) end
+      if not M.is_ignored(full_path, ignore_patterns, negate_patterns) then table.insert(files, full_path) end
     end
   end
 
@@ -665,19 +720,25 @@ end
 function M.is_first_letter_uppercase(str) return string.match(str, "^[A-Z]") ~= nil end
 
 ---@param content string
----@return { new_content: string, enable_project_context: boolean }
+---@return { new_content: string, enable_project_context: boolean, enable_diagnostics: boolean }
 function M.extract_mentions(content)
   -- if content contains @codebase, enable project context and remove @codebase
   local new_content = content
   local enable_project_context = false
+  local enable_diagnostics = false
   if content:match("@codebase") then
     enable_project_context = true
     new_content = content:gsub("@codebase", "")
   end
-  return { new_content = new_content, enable_project_context = enable_project_context }
+  if content:match("@diagnostics") then enable_diagnostics = true end
+  return {
+    new_content = new_content,
+    enable_project_context = enable_project_context,
+    enable_diagnostics = enable_diagnostics,
+  }
 end
 
----@alias AvanteMentions "codebase"
+---@alias AvanteMentions "codebase" | "diagnostics"
 ---@alias AvanteMentionCallback fun(args: string, cb?: fun(args: string): nil): nil
 ---@alias AvanteMention {description: string, command: AvanteMentions, details: string, shorthelp?: string, callback?: AvanteMentionCallback}
 ---@return AvanteMention[]
@@ -687,6 +748,11 @@ function M.get_mentions()
       description = "codebase",
       command = "codebase",
       details = "repo map",
+    },
+    {
+      description = "diagnostics",
+      command = "diagnostics",
+      details = "diagnostics",
     },
   }
 end
@@ -714,7 +780,7 @@ function M.get_or_create_buffer_with_filepath(filepath)
   api.nvim_set_current_buf(buf)
 
   -- Use the edit command to load the file content and set the buffer name
-  vim.cmd("edit " .. vim.fn.fnameescape(filepath))
+  vim.cmd("edit " .. fn.fnameescape(filepath))
 
   return buf
 end
@@ -758,6 +824,122 @@ function M.update_buffer_content(bufnr, new_lines)
   if #diffs == 0 then return end
   for _, diff in ipairs(diffs) do
     api.nvim_buf_set_lines(bufnr, diff.start_line - 1, diff.end_line - 1, false, diff.content)
+  end
+end
+
+local severity = {
+  [1] = "ERROR",
+  [2] = "WARNING",
+  [3] = "INFORMATION",
+  [4] = "HINT",
+}
+
+---@class AvanteDiagnostic
+---@field content string
+---@field start_line number
+---@field end_line number
+---@field severity string
+---@field source string
+
+---@param bufnr integer
+---@return AvanteDiagnostic[]
+function M.get_diagnostics(bufnr)
+  if bufnr == nil then bufnr = api.nvim_get_current_buf() end
+  local diagnositcs = ---@type vim.Diagnostic[]
+    vim.diagnostic.get(
+      bufnr,
+      { severity = { vim.diagnostic.severity.ERROR, vim.diagnostic.severity.WARN, vim.diagnostic.severity.HINT } }
+    )
+  return vim
+    .iter(diagnositcs)
+    :map(function(diagnostic)
+      local d = {
+        content = diagnostic.message,
+        start_line = diagnostic.lnum + 1,
+        end_line = diagnostic.end_lnum and diagnostic.end_lnum + 1 or diagnostic.lnum + 1,
+        severity = severity[diagnostic.severity],
+        source = diagnostic.source,
+      }
+      return d
+    end)
+    :totable()
+end
+
+---@param bufnr integer
+---@param selection avante.SelectionResult
+function M.get_current_selection_diagnostics(bufnr, selection)
+  local diagnostics = M.get_diagnostics(bufnr)
+  local selection_diagnostics = {}
+  for _, diagnostic in ipairs(diagnostics) do
+    if selection.range.start.lnum <= diagnostic.start_line and selection.range.finish.lnum >= diagnostic.end_line then
+      table.insert(selection_diagnostics, diagnostic)
+    end
+  end
+  return selection_diagnostics
+end
+
+function M.uniform_path(path)
+  if not M.file.is_in_cwd(path) then return path end
+  local project_root = M.get_project_root()
+  local abs_path = Path:new(project_root):joinpath(path):absolute()
+  local relative_path = Path:new(abs_path):make_relative(project_root)
+  return relative_path
+end
+
+function M.is_same_file(filepath_a, filepath_b) return M.uniform_path(filepath_a) == M.uniform_path(filepath_b) end
+
+function M.trim_think_content(content) return content:gsub("^<think>.-</think>", "", 1) end
+
+function M.get_filetype(filepath)
+  -- Some files are sometimes not detected correctly when buffer is not included
+  -- https://github.com/neovim/neovim/issues/27265
+
+  local buf = vim.api.nvim_create_buf(false, true)
+  local filetype = vim.filetype.match({ filename = filepath, buf = buf }) or ""
+  vim.api.nvim_buf_delete(buf, { force = true })
+
+  return filetype
+end
+
+---@param file_path string
+---@return string[]|nil lines
+---@return string|nil error
+function M.read_file_from_buf_or_disk(file_path)
+  --- Lookup if the file is loaded in a buffer
+  local bufnr = vim.fn.bufnr(file_path)
+  if bufnr ~= -1 and vim.api.nvim_buf_is_loaded(bufnr) then
+    -- If buffer exists and is loaded, get buffer content
+    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    return lines, nil
+  end
+
+  -- Fallback: read file from disk
+  local file, open_err = io.open(file_path, "r")
+  if file then
+    local content = file:read("*all")
+    file:close()
+    return vim.split(content, "\n"), nil
+  else
+    -- M.error("failed to open file: " .. file_path .. " with error: " .. open_err)
+    return {}, open_err
+  end
+end
+
+---Check if an icon plugin is installed
+---@return boolean
+M.icons_enabled = function() return M.has("nvim-web-devicons") or M.has("mini.icons") or M.has("mini.nvim") end
+
+---Display an string with icon, if an icon plugin is available.
+---Dev icons are an optional install for avante, this function prevents ugly chars
+---being displayed by displaying fallback options or nothing at all.
+---@param string_with_icon string
+---@param utf8_fallback string|nil
+---@return string
+M.icon = function(string_with_icon, utf8_fallback)
+  if M.icons_enabled() then
+    return string_with_icon
+  else
+    return utf8_fallback or ""
   end
 end
 

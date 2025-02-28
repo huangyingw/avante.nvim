@@ -1,18 +1,6 @@
-{# Uses https://mitsuhiko.github.io/minijinja-playground/ for testing:
-{
-  "ask": true,
-  "use_xml_format": true,
-  "question": "Refactor to include tab flow",
-  "code_lang": "lua",
-  "file_content": "local Config = require('avante.config')"
-}
-#}
-Act as an expert software developer.
-Always use best practices when coding.
-Respect and use existing conventions, libraries, etc that are already present in the code base.
-
+{% extends "base.avanterules" %}
 {%- if ask %}
-{% block user_prompt %}
+{% block extra_prompt %}
 Take requests for changes to the supplied code.
 If the request is ambiguous, ask questions.
 
@@ -54,7 +42,7 @@ import math
 from flask import Flask
 </REPLACE>
 
-mathweb/flask/app.py
+<FILEPATH>mathweb/flask/app.py</FILEPATH>
 <SEARCH>
 def factorial(n):
     "compute factorial"
@@ -106,6 +94,7 @@ def hello():
 <REPLACE>
 from hello import hello
 </REPLACE>
+
 # *SEARCH/REPLACE block* Rules:
 
 Every *SEARCH/REPLACE block* must use this format:
@@ -116,6 +105,24 @@ Every *SEARCH/REPLACE block* must use this format:
 5. The start of replace block: <REPLACE>
 6. The lines to replace into the source code
 7. The end of the replace block: </REPLACE>
+8. Please *DO NOT* put *SEARCH/REPLACE block* inside three backticks: {%raw%}```{%endraw%}
+10. Each block start and end tag must be on a separate line, and the lines they are on cannot contain anything else, I BEG YOU!
+
+This is bad case:
+
+<SEARCH>
+foo</SEARCH>
+<REPLACE>
+bar</REPLACE>
+
+This is good case:
+
+<SEARCH>
+foo
+</SEARCH>
+<REPLACE>
+bar
+</REPLACE>
 
 Use the *FULL* file path, as shown to you by the user.
 

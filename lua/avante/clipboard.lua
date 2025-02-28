@@ -4,6 +4,7 @@
 local Path = require("plenary.path")
 local Utils = require("avante.utils")
 local Config = require("avante.config")
+local Logger = require("avante.logger")
 ---@module "img-clip"
 local ImgClip = nil
 
@@ -54,17 +55,25 @@ end
 ---@param filepath string
 M.get_base64_content = function(filepath)
   local os_mapping = Utils.get_os_name()
+
   ---@type vim.SystemCompleted
   local output
+  local cmd
   if os_mapping == "darwin" or os_mapping == "linux" then
-    output = Utils.shell_run(("cat %s | base64 | tr -d '\n'"):format(filepath))
+    cmd = ("cat %s | base64 | tr -d '\n'"):format(filepath)
   else
-    output =
-      Utils.shell_run(("([Convert]::ToBase64String([IO.File]::ReadAllBytes('%s')) -replace '`r`n')"):format(filepath))
+    cmd = ("([Convert]::ToBase64String([IO.File]::ReadAllBytes('%s')) -replace '`r`n')"):format(filepath)
   end
+
+  Logger.write_log("Running command: " .. cmd)
+  output = Utils.shell_run(cmd)
+  Logger.write_log("Command exit code: " .. output.code)
+
   if output.code == 0 then
+    Logger.write_log("Base64 length: " .. #output.stdout)
     return output.stdout
   else
+    Logger.write_log("Error: " .. (output.stderr or "unknown error"))
     error("Failed to convert image to base64")
   end
 end

@@ -8,7 +8,6 @@ vim.o.termguicolors = false
 -- 设置当前的颜色方案为 'vim'
 vim.cmd('colorscheme vim')
 
-vim.cmd 'source ~/.vim/plugin/common.vim'
 vim.cmd 'source ~/.vimrc'
 
 -- 设置库路径
@@ -105,6 +104,18 @@ require("lazy").setup({
               insert_mode = true,
             },
             use_absolute_path = true,
+            save_format = "png",
+            show_notification = true,
+            is_verbose = true,
+            debug = true,
+            paste_command = function()
+              if vim.fn.has('mac') == 1 then
+                return { 'pngpaste', '-' }
+              elseif vim.fn.has('unix') == 1 then
+                return { 'xclip', '-selection', 'clipboard', '-t', 'image/png', '-o' }
+              end
+              return nil
+            end,
           },
         },
       },
@@ -117,45 +128,6 @@ require("lazy").setup({
       },
     },
   },
-  {
-    "pseewald/vim-anyfold",
-    dir = "~/.vim/bundle/vim-anyfold",
-    ft = "*",
-    config = function()
-      if vim.fn.filereadable(vim.fn.expand("~/.vim/bundle/vim-anyfold/plugin/anyfold.vim")) ~= 1 then
-        return
-      end
-
-      vim.g.anyfold_fold_display = 0
-      vim.g.anyfold_fold_comments = 1
-
-      local anyfold_group = vim.api.nvim_create_augroup("anyfold_group", { clear = true })
-
-      vim.api.nvim_create_autocmd("VimEnter", {
-        group = anyfold_group,
-        callback = function()
-          vim.defer_fn(function()
-            if vim.fn.exists('*anyfold#init') == 1 then
-              vim.fn['anyfold#init'](0)
-              vim.opt_local.foldmethod = "expr"
-              vim.opt_local.foldexpr = "anyfold#fold()"
-            end
-          end, 100)
-        end
-      })
-
-      vim.api.nvim_create_autocmd("BufEnter", {
-        group = anyfold_group,
-        pattern = "*",
-        callback = function()
-          if vim.fn.exists('*anyfold#init') == 1 then
-            vim.opt_local.foldmethod = "expr"
-            vim.opt_local.foldexpr = "anyfold#fold()"
-          end
-        end
-      })
-    end
-  }
 }, {
   performance = {
     rtp = {
@@ -174,44 +146,49 @@ vim.opt.laststatus = 3
 
 -- 设置图片保存路径
 local image_save_path = vim.fn.stdpath("data") .. "/avante/images"
+vim.fn.mkdir(image_save_path, "p")
 
 -- 设置 AvanteInput 缓冲区的 ctrl+v 处理
 vim.api.nvim_create_autocmd("FileType", {
   pattern = "AvanteInput",
   callback = function()
     vim.keymap.set({"n", "i"}, "<C-v>", function()
-      local ok, img_clip = pcall(require, "img-clip")
-      if not ok then
-        -- 如果 img-clip 加载失败，使用系统默认粘贴
-        vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-v>", true, true, true), "m", true)
+      -- 首先尝试获取普通剪贴板内容
+      local clipboard = vim.fn.getreg('+')
+
+      -- 如果剪贴板有普通文本内容，直接执行普通粘贴
+      if clipboard ~= "" then
+        vim.notify("执行普通文本粘贴", vim.log.levels.INFO)
+        vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-v>", true, true, true), "n", true)
         return
       end
 
+      -- 尝试加载 img-clip
+      local ok, img_clip = pcall(require, "img-clip")
+      if not ok then
+        vim.notify("Failed to load img-clip: " .. tostring(img_clip), vim.log.levels.ERROR)
+        vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-v>", true, true, true), "n", true)
+        return
+      end
+
+      -- 尝试粘贴图片
       local result = img_clip.paste_image({
         dir_path = image_save_path,
         use_absolute_path = true,
         show_notification = true,
-        -- 确保文件名只包含安全的字符
-        file_name = os.date("%Y-%m-%d-%H-%M-%S") .. ".png",
-        default = {
-          embed_image_as_base64 = false,
-          prompt_for_file_name = false,
-          drag_and_drop = {
-            insert_mode = true,
-          },
-          use_absolute_path = true,
-        },
+        file_name = os.date("%Y-%m-%d-%H-%M-%S") .. "_" .. tostring(os.clock()):gsub("%.", "") .. ".png",
+        on_error = function(err)
+          vim.notify("不是图片内容，执行普通粘贴", vim.log.levels.INFO)
+          vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-v>", true, true, true), "n", true)
+        end,
+        on_success = function(path)
+          vim.notify("成功粘贴图片: " .. path, vim.log.levels.INFO)
+        end,
       })
+
       if not result then
-        -- 检查剪贴板内容
-        local clipboard = vim.fn.getreg('+')
-        if clipboard:match("^image: ") then
-          -- 如果是图片路径，直接插入
-          vim.api.nvim_put({clipboard}, 'c', true, true)
-        else
-          -- 否则使用默认粘贴
-          vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-v>", true, true, true), "m", true)
-        end
+        vim.notify("尝试普通粘贴", vim.log.levels.INFO)
+        vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-v>", true, true, true), "n", true)
       end
     end, { buffer = true, noremap = true })
   end,
@@ -251,11 +228,6 @@ vim.api.nvim_create_autocmd("FileType", {
 vim.api.nvim_create_autocmd("FileType", {
   pattern = {"AvanteInput", "AvanteOutput"},
   callback = function()
-    -- 获取总窗口宽度
-    local total_width = vim.o.columns
-    -- 计算目标宽度 (80% 的总宽度)
-    local target_width = math.floor(total_width * 0.8)
-    -- 设置窗口宽度
-    vim.api.nvim_win_set_width(0, target_width)
+    vim.api.nvim_win_set_width(0, vim.o.columns)
   end
 })

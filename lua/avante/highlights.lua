@@ -15,6 +15,7 @@ local Highlights = {
   ANNOTATION = { name = "AvanteAnnotation", link = "Comment" },
   POPUP_HINT = { name = "AvantePopupHint", link = "NormalFloat" },
   INLINE_HINT = { name = "AvanteInlineHint", link = "Keyword" },
+  TO_BE_DELETED = { name = "AvanteToBeDeleted", bg = "#ffcccc", strikethrough = true },
 }
 
 Highlights.conflict = {
@@ -46,7 +47,11 @@ M.setup = function()
       end)
       :each(function(_, hl)
         if not has_set_colors(hl.name) then
-          api.nvim_set_hl(0, hl.name, { fg = hl.fg or nil, bg = hl.bg or nil, link = hl.link or nil })
+          api.nvim_set_hl(
+            0,
+            hl.name,
+            { fg = hl.fg or nil, bg = hl.bg or nil, link = hl.link or nil, strikethrough = hl.strikethrough }
+          )
         end
       end)
   end
@@ -119,11 +124,12 @@ H.alter = function(attr, percent) return math.floor(attr * (100 + percent) / 100
 
 ---@source https://stackoverflow.com/q/5560248
 ---@see https://stackoverflow.com/a/37797380
----Darken a specified hex color
+---Lighten a specified hex color
 ---@param color number
 ---@param percent number
 ---@return string
 H.shade_color = function(color, percent)
+  percent = vim.opt.background:get() == "light" and percent / 10 or percent
   local rgb = H.decode_24bit_rgb(color)
   if not rgb.r or not rgb.g or not rgb.b then return "NONE" end
   local r, g, b = H.alter(rgb.r, percent), H.alter(rgb.g, percent), H.alter(rgb.b, percent)

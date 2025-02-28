@@ -15,6 +15,7 @@ local Config = require("avante.config")
 ---@field selected_file {filepath: string}?
 ---@field selected_code {filetype: string, content: string}?
 ---@field reset_memory boolean?
+---@field selected_filepaths string[] | nil
 
 ---@class avante.Path
 ---@field history_path Path
@@ -87,16 +88,15 @@ local templates = nil
 
 Prompt.templates = { planning = nil, editing = nil, suggesting = nil }
 
--- Creates a directory in the cache path for the given buffer and copies the custom prompts to it.
 -- We need to do this beacuse the prompt template engine requires a given directory to load all required files.
 -- PERF: Hmm instead of copy to cache, we can also load in globals context, but it requires some work on bindings. (eh maybe?)
----@param bufnr number
+---@param project_root string
 ---@return string the resulted cache_directory to be loaded with avante_templates
-Prompt.get = function(bufnr)
+Prompt.get = function(project_root)
   if not P.available() then error("Make sure to build avante (missing avante_templates)", 2) end
 
   -- get root directory of given bufnr
-  local directory = Path:new(Utils.root.get({ buf = bufnr }))
+  local directory = Path:new(project_root)
   if Utils.get_os_name() == "windows" then directory = Path:new(directory:absolute():gsub("^%a:", "")[1]) end
   ---@cast directory Path
   ---@type Path
@@ -177,6 +177,18 @@ end
 
 P.repo_map = RepoMap
 
+---@return AvanteTemplates|nil
+P._init_templates_lib = function()
+  if templates ~= nil then return templates end
+  local ok, module = pcall(require, "avante_templates")
+  ---@cast module AvanteTemplates
+  ---@cast ok boolean
+  if not ok then return nil end
+  templates = module
+
+  return templates
+end
+
 P.setup = function()
   local history_path = Path:new(Config.history.storage_path)
   if not history_path:exists() then history_path:mkdir({ parents = true }) end
@@ -190,16 +202,10 @@ P.setup = function()
   if not data_path:exists() then data_path:mkdir({ parents = true }) end
   P.data_path = data_path
 
-  vim.defer_fn(function()
-    local ok, module = pcall(require, "avante_templates")
-    ---@cast module AvanteTemplates
-    ---@cast ok boolean
-    if not ok then return end
-    if templates == nil then templates = module end
-  end, 1000)
+  vim.defer_fn(P._init_templates_lib, 1000)
 end
 
-P.available = function() return templates ~= nil end
+P.available = function() return P._init_templates_lib() ~= nil end
 
 P.clear = function()
   P.cache_path:rm({ recursive = true })
@@ -207,6 +213,9 @@ P.clear = function()
 
   if not P.cache_path:exists() then P.cache_path:mkdir({ parents = true }) end
   if not P.history_path:exists() then P.history_path:mkdir({ parents = true }) end
+  
+  -- Clear the history file cache
+  history_file_cache = LRUCache:new(12)
 end
 
 return P
