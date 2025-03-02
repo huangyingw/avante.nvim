@@ -796,13 +796,11 @@ The high quality and ingenuity of these projects' source code have been immensel
 
 avante.nvim is licensed under the Apache 2.0 License. For more details, please refer to the [LICENSE](./LICENSE) file.
 
-# Star History
+brew install rust
+brew install pngpaste
 
-<p align="center">
-  <a target="_blank" href="https://star-history.com/#yetone/avante.nvim&Date">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=yetone/avante.nvim&type=Date&theme=dark">
-      <img alt="NebulaGraph Data Intelligence Suite(ngdi)" src="https://api.star-history.com/svg?repos=yetone/avante.nvim&type=Date">
-    </picture>
-  </a>
-</p>
+帮我设计一个二分查找算法.
+帮我解决这个问题.
+还能再优化吗?
+/Users/huangyingw/.local/share/nvim/avante/images/2024-11-15-18-22-50.png
+请描述一下这张图片的内容：/Users/huangyingw/.local/share/nvim/avante/images/2024-11-15-18-22-50.png
