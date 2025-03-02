@@ -249,14 +249,11 @@ function M.bash(opts, on_log, on_complete)
     return false, "User canceled"
   end
   ---change cwd to abs_path
-  local old_cwd = vim.fn.getcwd()
-  vim.fn.chdir(abs_path)
   ---@param output string
   ---@param exit_code integer
   ---@return string | boolean | nil result
   ---@return string | nil error
   local function handle_result(output, exit_code)
-    vim.fn.chdir(old_cwd)
     if exit_code ~= 0 then
       if output then return false, "Error: " .. output .. "; Error code: " .. tostring(exit_code) end
       return false, "Error code: " .. tostring(exit_code)
@@ -267,10 +264,13 @@ function M.bash(opts, on_log, on_complete)
     Utils.shell_run_async(opts.command, "bash -c", function(output, exit_code)
       local result, err = handle_result(output, exit_code)
       on_complete(result, err)
-    end)
+    end, abs_path)
     return nil, nil
   end
+  local old_cwd = vim.fn.getcwd()
+  vim.fn.chdir(abs_path)
   local res = Utils.shell_run(opts.command, "bash -c")
+  vim.fn.chdir(old_cwd)
   return handle_result(res.stdout, res.code)
 end
 
@@ -337,7 +337,7 @@ function M.web_search(opts, on_log)
   elseif provider_type == "google" then
     local engine_id = os.getenv(search_engine.engine_id_name)
     if engine_id == nil or engine_id == "" then
-      return nil, "Environment variable " .. search_engine.engine_id_namee .. " is not set"
+      return nil, "Environment variable " .. search_engine.engine_id_name .. " is not set"
     end
     local query_params = vim.tbl_deep_extend("force", {
       key = api_key,
@@ -515,7 +515,7 @@ function M.rag_search(opts, on_log)
 end
 
 ---@type AvanteLLMToolFunc<{ code: string, rel_path: string, container_image?: string }>
-function M.python(opts, on_log)
+function M.python(opts, on_log, on_complete)
   local abs_path = get_abs_path(opts.rel_path)
   if not has_permission_to_access(abs_path) then return nil, "No permission to access path: " .. abs_path end
   if not Path:new(abs_path):exists() then return nil, "Path not found: " .. abs_path end
@@ -535,12 +535,15 @@ function M.python(opts, on_log)
     return nil, "User canceled"
   end
   if vim.fn.executable("docker") == 0 then return nil, "Python tool is not available to execute any code" end
-  ---change cwd to abs_path
-  local old_cwd = vim.fn.getcwd()
 
-  vim.fn.chdir(abs_path)
-  local output = vim
-    .system({
+  local function handle_result(result) ---@param result vim.SystemCompleted
+    if result.code ~= 0 then return nil, "Error: " .. (result.stderr or "Unknown error") end
+
+    Utils.debug("output", result.stdout)
+    return result.stdout, nil
+  end
+  local job = vim.system(
+    {
       "docker",
       "run",
       "--rm",
@@ -552,24 +555,29 @@ function M.python(opts, on_log)
       "python",
       "-c",
       opts.code,
-    }, {
+    },
+    {
       text = true,
-    })
-    :wait()
-
-  vim.fn.chdir(old_cwd)
-
-  if output.code ~= 0 then return nil, "Error: " .. (output.stderr or "Unknown error") end
-
-  Utils.debug("output", output.stdout)
-  return output.stdout, nil
+      cwd = abs_path,
+    },
+    vim.schedule_wrap(function(result)
+      if not on_complete then return end
+      local output, err = handle_result(result)
+      on_complete(output, err)
+    end)
+  )
+  if on_complete then return end
+  local result = job:wait()
+  return handle_result(result)
 end
 
 ---@return AvanteLLMTool[]
 function M.get_tools()
   return vim
     .iter(M._tools)
-    :filter(function(tool)
+    :filter(function(tool) ---@param tool AvanteLLMTool
+      -- Always disable tools that are explicitly disabled
+      if vim.tbl_contains(Config.disabled_tools, tool.name) then return false end
       if tool.enabled == nil then
         return true
       else
