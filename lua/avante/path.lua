@@ -67,6 +67,13 @@ end
 ---@param history avante.ChatHistoryEntry[]
 History.save = vim.schedule_wrap(function(bufnr, history)
   local history_file = History.get(bufnr)
+  
+  -- 确保目录存在
+  local parent_dir = history_file:parent()
+  if not parent_dir:exists() then
+    parent_dir:mkdir({ parents = true })
+  end
+  
   local cached_key = tostring(history_file:absolute())
   history_file:write(vim.json.encode(history), "w")
   history_file_cache:set(cached_key, history)
@@ -228,6 +235,11 @@ end
 
 function P.available() return P._init_templates_lib() ~= nil end
 
+-- 清除历史文件缓存的函数
+function P.clear_history_cache()
+  history_file_cache = LRUCache:new(12)
+end
+
 function P.clear()
   -- 添加强制删除和刷新
   if P.cache_path:exists() then
@@ -238,13 +250,13 @@ function P.clear()
   end
 
   -- 强制刷新，确保目录被删除
-  vim.cmd("sleep 10m")
+  vim.cmd("sleep 50m")
 
   if not P.cache_path:exists() then P.cache_path:mkdir({ parents = true }) end
   if not P.history_path:exists() then P.history_path:mkdir({ parents = true }) end
   
   -- 清除历史文件缓存
-  history_file_cache = LRUCache:new(12)
+  P.clear_history_cache()
   
   -- 强制通知用户
   Utils.info("缓存和历史记录已清除")

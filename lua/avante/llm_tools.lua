@@ -95,8 +95,6 @@ function M.search_keyword(opts, on_log)
     cmd = string.format("%s -riH --exclude-dir=.git %s %s", search_cmd, opts.keyword, abs_path)
   end
 
-  Utils.debug("cmd", cmd)
-  if on_log then on_log("Running command: " .. cmd) end
   local result = vim.fn.system(cmd)
 
   local filepaths = vim.split(result, "\n")
@@ -278,8 +276,6 @@ end
 function M.web_search(opts, on_log)
   local provider_type = Config.web_search_engine.provider
   if provider_type == nil then return nil, "Search engine provider is not set" end
-  if on_log then on_log("provider: " .. provider_type) end
-  if on_log then on_log("query: " .. opts.query) end
   local search_engine = Config.web_search_engine.providers[provider_type]
   if search_engine == nil then return nil, "No search engine found: " .. provider_type end
   if search_engine.api_key_name == "" then return nil, "No API key provided" end
@@ -399,13 +395,11 @@ function M.git_diff(opts, on_log)
   -- Get the diff
   local scope = opts.scope or ""
   local cmd = string.format("git diff --cached %s", scope)
-  if on_log then on_log("Running command: " .. cmd) end
   local diff = vim.fn.system(cmd)
 
   if diff == "" then
     -- If there's no staged changes, get unstaged changes
     cmd = string.format("git diff %s", scope)
-    if on_log then on_log("No staged changes. Running command: " .. cmd) end
     diff = vim.fn.system(cmd)
   end
 
@@ -519,8 +513,6 @@ function M.python(opts, on_log, on_complete)
   local abs_path = get_abs_path(opts.rel_path)
   if not has_permission_to_access(abs_path) then return nil, "No permission to access path: " .. abs_path end
   if not Path:new(abs_path):exists() then return nil, "Path not found: " .. abs_path end
-  if on_log then on_log("cwd: " .. abs_path) end
-  if on_log then on_log("code:\n" .. opts.code) end
   local container_image = opts.container_image or "python:3.11-slim-bookworm"
   if
     not M.confirm(
@@ -539,7 +531,6 @@ function M.python(opts, on_log, on_complete)
   local function handle_result(result) ---@param result vim.SystemCompleted
     if result.code ~= 0 then return nil, "Error: " .. (result.stderr or "Unknown error") end
 
-    Utils.debug("output", result.stdout)
     return result.stdout, nil
   end
   local job = vim.system(
@@ -573,6 +564,11 @@ end
 
 ---@return AvanteLLMTool[]
 function M.get_tools()
+  -- 禁用所有工具功能，始终返回空数组
+  return {}
+  
+  -- 原始实现
+  --[[ 
   return vim
     .iter(M._tools)
     :filter(function(tool) ---@param tool AvanteLLMTool
@@ -585,6 +581,7 @@ function M.get_tools()
       end
     end)
     :totable()
+  --]]
 end
 
 ---@type AvanteLLMTool[]
@@ -1064,33 +1061,6 @@ M._tools = {
     },
   },
   {
-    name = "web_search",
-    description = "Search the web",
-    param = {
-      type = "table",
-      fields = {
-        {
-          name = "query",
-          description = "Query to search",
-          type = "string",
-        },
-      },
-    },
-    returns = {
-      {
-        name = "result",
-        description = "Result of the search",
-        type = "string",
-      },
-      {
-        name = "error",
-        description = "Error message if the search was not successful",
-        type = "string",
-        optional = true,
-      },
-    },
-  },
-  {
     name = "fetch",
     description = "Fetch markdown from a url",
     param = {
@@ -1117,6 +1087,33 @@ M._tools = {
       },
     },
   },
+  {
+    name = "web_search",
+    description = "Search the web",
+    param = {
+      type = "table",
+      fields = {
+        {
+          name = "query",
+          description = "Query to search",
+          type = "string",
+        },
+      },
+    },
+    returns = {
+      {
+        name = "result",
+        description = "Result of the search",
+        type = "string",
+      },
+      {
+        name = "error",
+        description = "Error message if the search was not successful",
+        type = "string",
+        optional = true,
+      },
+    },
+  },
 }
 
 ---@param tools AvanteLLMTool[]
@@ -1126,19 +1123,14 @@ M._tools = {
 ---@return string | nil result
 ---@return string | nil error
 function M.process_tool_use(tools, tool_use, on_log, on_complete)
-  Utils.debug("use tool", tool_use.name, tool_use.input_json)
   ---@type AvanteLLMTool?
   local tool = vim.iter(tools):find(function(tool) return tool.name == tool_use.name end) ---@param tool AvanteLLMTool
   if tool == nil then return end
   local input_json = vim.json.decode(tool_use.input_json)
   local func = tool.func or M[tool.name]
-  if on_log then on_log(tool.name, "running tool") end
   ---@param result string | nil | boolean
   ---@param err string | nil
   local function handle_result(result, err)
-    if on_log then on_log(tool.name, "tool finished") end
-    -- Utils.debug("result", result)
-    -- Utils.debug("error", error)
     if err ~= nil then
       if on_log then on_log(tool.name, "Error: " .. err) end
     end
@@ -1151,7 +1143,6 @@ function M.process_tool_use(tools, tool_use, on_log, on_complete)
     return result_str, err
   end
   local result, err = func(input_json, function(log)
-    if on_log then on_log(tool.name, log) end
   end, function(result, err)
     result, err = handle_result(result, err)
     if on_complete == nil then

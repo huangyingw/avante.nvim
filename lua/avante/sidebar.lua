@@ -2145,10 +2145,23 @@ function Sidebar:get_content_between_separators()
 end
 
 function Sidebar:clear_history(args, cb)
+  -- 强制清空历史文件
   local chat_history = Path.history.load(self.code.bufnr)
-  -- 强制清空历史
   chat_history = {}
+  
+  -- 确保历史文件目录存在
+  local history_file = Path.history.get(self.code.bufnr)
+  local parent_dir = history_file:parent()
+  if not parent_dir:exists() then
+    parent_dir:mkdir({ parents = true })
+  end
+  
+  -- 保存空的历史记录
   Path.history.save(self.code.bufnr, chat_history)
+  
+  -- 强制重置会话状态
+  self.code.context = nil
+  self.message_history = {}
   
   -- 强制清空结果窗口内容，同时确保缓冲区是可修改的
   if self.result_container and self.result_container.bufnr and vim.api.nvim_buf_is_valid(self.result_container.bufnr) then

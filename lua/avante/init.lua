@@ -46,6 +46,11 @@ function H.load_path()
       })
     end
 
+    -- 加载禁用工具的配置
+    vim.schedule(function()
+      pcall(require, "avante.disable_tools")
+    end)
+
     api.nvim_create_autocmd("User", {
       pattern = "VeryLazy",
       callback = load_path,

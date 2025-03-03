@@ -471,8 +471,32 @@ cmd("Clear", function(opts)
       return
     end
     if arg == "history" then
-      -- 强制清除历史
-      sidebar:clear_history()
+      -- 强制清除历史文件
+      local P = require("avante.path")
+      if P.history_path:exists() then
+        -- 使用更强力的方式删除历史目录
+        local success, err = pcall(function()
+          P.history_path:rm({ recursive = true })
+          -- 确保目录被删除后再重新创建
+          vim.cmd("sleep 50m")
+          if not P.history_path:exists() then
+            P.history_path:mkdir({ parents = true })
+          end
+          -- 清除历史文件缓存
+          require("avante.path").clear_history_cache()
+        end)
+        
+        if not success then
+          Utils.error("清除历史记录失败: " .. tostring(err))
+          return
+        end
+      end
+      
+      -- 强制清除当前会话历史
+      if sidebar then
+        sidebar:clear_history()
+      end
+      
       -- 强制刷新UI
       vim.cmd("redraw!")
       Utils.info("历史记录已清除")
@@ -498,3 +522,58 @@ end, {
   complete = function(_, _, _) return { "history", "memory", "cache" } end,
 })
 cmd("ShowRepoMap", function() require("avante.repo_map").show() end, { desc = "avante: show repo map" })
+
+-- 添加AvanteClear命令作为AvanteClean history的快捷方式
+vim.api.nvim_create_user_command("AvanteClear", function()
+  -- 直接调用AvanteClean history
+  local sidebar = require("avante").get()
+  if not sidebar then
+    Utils.error("No sidebar found")
+    return
+  end
+  
+  -- 强制清除历史文件
+  local P = require("avante.path")
+  if P.history_path:exists() then
+    -- 使用更强力的方式删除历史目录
+    local success, err = pcall(function()
+      P.history_path:rm({ recursive = true })
+      -- 确保目录被删除后再重新创建
+      vim.cmd("sleep 50m")
+      if not P.history_path:exists() then
+        P.history_path:mkdir({ parents = true })
+      end
+      -- 清除历史文件缓存
+      require("avante.path").clear_history_cache()
+    end)
+    
+    if not success then
+      Utils.error("清除历史记录失败: " .. tostring(err))
+      return
+    end
+  end
+  
+  -- 强制清除当前会话历史
+  if sidebar then
+    sidebar:clear_history()
+  end
+  
+  -- 强制刷新UI
+  vim.cmd("redraw!")
+  Utils.info("历史记录已清除")
+end, { desc = "avante: clear chat history (shortcut for AvanteClean history)" })
+
+-- 添加禁用工具的命令
+vim.api.nvim_create_user_command("AvanteDisableTools", function()
+  require("avante.disable_tools")
+end, {
+  desc = "禁用所有Avante工具功能"
+})
+
+-- 添加启用工具的命令
+vim.api.nvim_create_user_command("AvanteEnableTools", function()
+  local disable_tools = require("avante.disable_tools")
+  disable_tools.enable_tools()
+end, {
+  desc = "启用Avante工具功能"
+})
