@@ -10,8 +10,8 @@
   url = git@github.com:yetone/avante.nvim.git
   fetch = +refs/heads/*:refs/remotes/yetone/*
 [gsync]
-  remote = yetone
-  target = yetone/main
+  remote = origin
+  target = origin/dev
 [gdio]
   ignore = ./.config/nvim/init.lua
   ignore = ./.cursorrules
